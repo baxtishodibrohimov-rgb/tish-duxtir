@@ -212,9 +212,12 @@ function buildWhere(m: MemberCtx, res: Resource, query: Record<string, string>, 
   return where;
 }
 
+// Bo'sh bo'lishi mumkin bo'lgan, lekin NULL bo'lmaydigan matn ustunlari.
+const KEEP_EMPTY = new Set(['name', 'first_name', 'last_name', 'middle_name', 'title', 'reason']);
+
 function pick(res: Resource, body: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
-  for (const c of res.columns) if (c in body) out[c] = body[c] === '' ? null : body[c];
+  for (const c of res.columns) if (c in body) out[c] = body[c] === '' && !KEEP_EMPTY.has(c) ? null : body[c];
   return out;
 }
 
