@@ -82,7 +82,7 @@ const R: Record<string, Resource> = {
     order: 'moved_at desc' },
 
   warehouses: { table: 'warehouses', scope: 'branch', read: null, write: 'warehouse.admin',
-    columns: ['branch_id', 'name', 'responsible_id', 'is_main', 'note', 'archived'], filters: ['branch_id', 'archived'], order: 'is_main desc, name' },
+    columns: ['branch_id', 'name', 'responsible_id', 'is_main', 'note', 'archived'], filters: ['branch_id', 'archived', 'is_main'], order: 'is_main desc, name' },
   product_categories: { table: 'product_categories', scope: 'org', read: 'warehouse.view', write: 'warehouse.admin',
     columns: ['parent_id', 'name', 'position'], filters: ['parent_id'], order: 'position, name' },
   brands: { table: 'brands', scope: 'org', read: 'warehouse.view', write: 'warehouse.admin',

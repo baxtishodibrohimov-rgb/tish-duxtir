@@ -8,6 +8,25 @@ import { bad, forbidden, notFound } from '../errors.js';
 const Period = z.object({ branch_id: z.string().uuid().optional(), from: z.string(), to: z.string() });
 
 export async function clinicRoutes(app: FastifyInstance) {
+  // ---------- Tashkilot sozlamalari ----------
+  app.patch('/api/org', async (req) => {
+    const m = requireMember(req);
+    if (!can(m, 'settings.edit')) throw forbidden();
+    const b = z.object({
+      name: z.string().trim().min(1).max(120).optional(),
+      allow_negative_stock: z.boolean().optional(),
+      stock_mode: z.enum(['simple', 'mid', 'exact']).optional(),
+      telegram_chat_id: z.string().max(40).nullable().optional(),
+      logo_url: z.string().max(500).nullable().optional(),
+    }).parse(req.body);
+    return tx(m.user_id, async (c) => {
+      const cols = Object.keys(b) as (keyof typeof b)[];
+      if (!cols.length) return one(c, 'select * from orgs where id = $1', [m.org_id]);
+      const sets = cols.map((k, i) => k + ' = $' + String(i + 2)).join(', ');
+      return one(c, 'update orgs set ' + sets + ' where id = $1 returning *', [m.org_id, ...cols.map((k) => b[k])]);
+    });
+  });
+
   // ---------- Aktlar ----------
   app.get<{ Params: { id: string } }>('/api/acts/:id/shortage', async (req) => {
     const m = requireMember(req);
