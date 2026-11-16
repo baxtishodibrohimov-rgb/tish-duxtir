@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/* Dizayn tokenlari (artifakt prototipi bilan bir xil) */
+@theme {
+  --font-sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-primary: #00a1db;
+  --color-primary-hover: #0086b8;
+  --color-primary-soft: #d1f1ff;
+  --color-surface: #f7fbfd;
+  --color-muted: #f0f4f7;
+  --color-line: #dfe6eb;
+  --color-fg: #07121e;
+  --color-sub: #5b646f;
+  --color-faint: #9aa3ad;
+  --color-nav: #e8f0f6;
+  --color-nav-fg: #071727;
+  --color-ok: #15803d;
+  --color-ok-soft: #dcfce7;
+  --color-bad: #ef4444;
+  --color-bad-soft: #fee2e2;
+  --color-warn: #b45309;
+  --color-warn-soft: #fef3c7;
+  --radius-card: 20px;
+  --shadow-pop: 0 4px 12px rgba(7, 18, 30, .08), 0 24px 48px -12px rgba(7, 18, 30, .12);
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--color-primary); }
+a:hover { color: var(--color-primary-hover); }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+input, select, textarea, button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+
+input[type=number]::-webkit-inner-spin-button { opacity: .4; }
+
+/* Kategoriya daraxti chiziqlari */
+.tree-children { position: relative; margin-left: 9px; padding-left: 12px; }
+.tree-children::before { content: ""; position: absolute; left: 0; top: 0; bottom: 14px; border-left: 1px dotted #9aa3ad; }
+.tree-node { position: relative; }
+.tree-children > .tree-node::before { content: ""; position: absolute; left: -12px; top: 15px; width: 10px; border-top: 1px dotted #9aa3ad; }
