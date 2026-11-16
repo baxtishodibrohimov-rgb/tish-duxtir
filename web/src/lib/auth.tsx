@@ -1,10 +1,9 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { Session } from '@supabase/supabase-js';
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase, must } from './supabase';
-import type { Clinic, Member, Perm, Role } from './types';
+import { http, ApiError } from './api';
+import type { Branch, Member, Org, Perm, Role, User } from './types';
 
-// Bazadagi role_default_perm() bilan bir xil bo'lishi shart.
+// server/src/perms.ts bilan bir xil.
 const ROLE_PERMS: Record<Role, Perm[] | 'all'> = {
   owner: 'all',
   admin: ['schedule.view', 'schedule.edit', 'patients.view', 'patients.edit', 'cashbox.view', 'cashbox.edit', 'warehouse.view', 'reports.view'],
@@ -19,81 +18,87 @@ export const ROLE_LABEL: Record<Role, string> = {
 };
 
 export const ALL_PERMS: { key: Perm; label: string }[] = [
-  { key: 'schedule.view', label: 'Jadvalni ko‘rish' },
-  { key: 'schedule.edit', label: 'Jadvalga yozish' },
-  { key: 'patients.view', label: 'Bemorlarni ko‘rish' },
-  { key: 'patients.edit', label: 'Bemorlarni tahrirlash' },
-  { key: 'cashbox.view', label: 'Kassani ko‘rish' },
-  { key: 'cashbox.edit', label: 'Kassa amallari' },
-  { key: 'warehouse.view', label: 'Omborni ko‘rish' },
-  { key: 'warehouse.edit', label: 'Nakladnoylar' },
-  { key: 'warehouse.admin', label: 'Ombor sozlamalari' },
-  { key: 'reports.view', label: 'Hisobotlar' },
-  { key: 'settings.edit', label: 'Klinika sozlamalari' },
-  { key: 'staff.manage', label: 'Xodimlarni boshqarish' },
+  { key: 'schedule.view', label: 'Jadvalni ko‘rish' }, { key: 'schedule.edit', label: 'Jadvalga yozish' },
+  { key: 'patients.view', label: 'Bemorlarni ko‘rish' }, { key: 'patients.edit', label: 'Bemorlarni tahrirlash' },
+  { key: 'cashbox.view', label: 'Kassani ko‘rish' }, { key: 'cashbox.edit', label: 'Kassa amallari' },
+  { key: 'warehouse.view', label: 'Omborni ko‘rish' }, { key: 'warehouse.edit', label: 'Nakladnoylar' },
+  { key: 'warehouse.admin', label: 'Ombor sozlamalari' }, { key: 'reports.view', label: 'Hisobotlar' },
+  { key: 'settings.edit', label: 'Klinika sozlamalari' }, { key: 'staff.manage', label: 'Xodimlarni boshqarish' },
 ];
 
-export function memberCan(m: Member | null | undefined, p: Perm): boolean {
-  if (!m) return false;
-  if (m.role === 'owner') return true;
-  if (p in m.permissions) return Boolean(m.permissions[p]);
-  const d = ROLE_PERMS[m.role];
+export function roleDefault(role: Role, p: Perm) {
+  const d = ROLE_PERMS[role];
   return d === 'all' || d.includes(p);
 }
 
-interface AuthValue {
-  session: Session | null;
-  loading: boolean;
-  clinic: Clinic | null;
-  member: Member | null;
+interface MeResponse {
+  user: User;
+  member: (Member & { org_id: string }) | null;
+  org: Org | null;
+  branches: Branch[];
   members: Member[];
-  can: (p: Perm) => boolean;
-  refresh: () => void;
+}
+
+interface AuthValue {
+  user: User | null;
+  loading: boolean;
+  org: Org | null;
+  me: Member | null;
+  members: Member[];
+  branches: Branch[];
+  branch: Branch | null;
+  setBranch: (id: string) => void;
+  can: (p: Perm, branchId?: string) => boolean;
+  refresh: () => Promise<unknown>;
   signOut: () => Promise<void>;
+  memberName: (userId: string | null | undefined) => string;
 }
 
 const Ctx = createContext<AuthValue | null>(null);
+const BRANCH_KEY = 'td-branch';
+
+function readBranch() { try { return localStorage.getItem(BRANCH_KEY); } catch { return null; } }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [ready, setReady] = useState(false);
   const qc = useQueryClient();
+  const [branchId, setBranchId] = useState<string | null>(readBranch);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true); });
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => { setSession(s); qc.clear(); });
-    return () => data.subscription.unsubscribe();
-  }, [qc]);
-
-  const uid = session?.user.id;
-  const ctx = useQuery({
-    queryKey: ['auth-ctx', uid],
-    enabled: !!uid,
+  const me = useQuery({
+    queryKey: ['me'],
+    retry: false,
+    staleTime: 5 * 60_000,
     queryFn: async () => {
-      const mine = must(await supabase.from('clinic_members').select('*').eq('user_id', uid!).eq('is_active', true)) as Member[];
-      // Bir nechta klinika bo'lsa — oxirgi tanlangani (localStorage).
-      let pick = mine[0];
-      try {
-        const saved = localStorage.getItem('td-clinic');
-        pick = mine.find((m) => m.clinic_id === saved) ?? pick;
-      } catch { /* localStorage yo'q bo'lishi mumkin */ }
-      if (!pick) return { clinic: null, member: null, members: [] as Member[] };
-      const clinic = must(await supabase.from('clinics').select('*').eq('id', pick.clinic_id).single()) as Clinic;
-      const members = must(await supabase.from('clinic_members').select('*').eq('clinic_id', clinic.id).order('created_at')) as Member[];
-      return { clinic, member: pick, members };
+      try { return await http.get<MeResponse>('/api/me'); }
+      catch (e) { if (e instanceof ApiError && e.status === 401) return null; throw e; }
     },
   });
 
-  const value = useMemo<AuthValue>(() => ({
-    session,
-    loading: !ready || (!!uid && ctx.isLoading),
-    clinic: ctx.data?.clinic ?? null,
-    member: ctx.data?.member ?? null,
-    members: ctx.data?.members ?? [],
-    can: (p) => memberCan(ctx.data?.member, p),
-    refresh: () => { void ctx.refetch(); },
-    signOut: async () => { await supabase.auth.signOut(); },
-  }), [session, ready, uid, ctx]);
+  const value = useMemo<AuthValue>(() => {
+    const d = me.data;
+    const member = d?.member ?? null;
+    const branches = d?.branches ?? [];
+    const branch = branches.find((b) => b.id === branchId) ?? branches[0] ?? null;
+    const byUser = new Map((d?.members ?? []).map((m) => [m.user_id, m.full_name]));
+    return {
+      user: d?.user ?? null,
+      loading: me.isLoading,
+      org: d?.org ?? null,
+      me: member,
+      members: d?.members ?? [],
+      branches,
+      branch,
+      setBranch: (id) => { setBranchId(id); try { localStorage.setItem(BRANCH_KEY, id); } catch { /* yo'q */ } },
+      can: (p, bid) => {
+        if (!member) return false;
+        const ok = member.role === 'owner' ? true : p in member.permissions ? Boolean(member.permissions[p]) : roleDefault(member.role, p);
+        if (!ok) return false;
+        return !bid || branches.some((b) => b.id === bid);
+      },
+      refresh: () => me.refetch(),
+      signOut: async () => { await http.post('/api/auth/logout'); qc.clear(); await me.refetch(); },
+      memberName: (uid) => (uid ? byUser.get(uid) ?? '—' : '—'),
+    };
+  }, [me, branchId, qc]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -104,9 +109,9 @@ export function useAuth() {
   return v;
 }
 
-/** Klinika ichidagi sahifalar uchun: klinika aniq mavjud. */
-export function useClinic() {
+/** Klinika ichidagi sahifalar uchun: tashkilot va filial aniq mavjud. */
+export function useOrg() {
   const a = useAuth();
-  if (!a.clinic || !a.member) throw new Error('Klinika tanlanmagan');
-  return { ...a, clinic: a.clinic, member: a.member };
+  if (!a.org || !a.me || !a.branch) throw new Error('Filial tanlanmagan');
+  return { ...a, org: a.org, me: a.me, branch: a.branch };
 }
