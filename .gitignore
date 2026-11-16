@@ -7,3 +7,5 @@ dist
 supabase/.temp
 server/dist
 server/data
+deploy/.env
+deploy/backups

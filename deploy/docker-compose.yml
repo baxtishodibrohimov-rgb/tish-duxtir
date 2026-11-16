@@ -1,0 +1,68 @@
+# Ishga tushirish: cd deploy && docker compose up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tishduxtir
+      POSTGRES_USER: tishduxtir
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD .env da bo'lishi kerak}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tishduxtir -d tishduxtir"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: { context: .., target: api }
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://tishduxtir:${DB_PASSWORD}@db:5432/tishduxtir
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET .env da bo'lishi kerak}
+      FILES_DIR: /data/files
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+    volumes:
+      - files:/data/files
+
+  web:
+    build: { context: .., target: web }
+    restart: unless-stopped
+    depends_on: [api]
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN .env da bo'lishi kerak}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # Har kuni 03:00 da bazaning to'liq nusxasi va fayllar arxivi; 14 kunlik nusxalar saqlanadi.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      PGHOST: db
+      PGUSER: tishduxtir
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: tishduxtir
+      KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      TZ: Asia/Tashkent
+    volumes:
+      - ./backups:/backups
+      - files:/data/files:ro
+      - ./backup.sh:/backup.sh:ro
+    entrypoint: ["/bin/sh", "-c", "echo '0 3 * * * /bin/sh /backup.sh >> /backups/backup.log 2>&1' | crontab - && crond -f -l 8"]
+
+volumes:
+  pgdata:
+  files:
+  caddy_data:
+  caddy_config:
