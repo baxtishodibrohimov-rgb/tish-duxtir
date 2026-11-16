@@ -1,4 +1,5 @@
 # Ishga tushirish: cd deploy && docker compose up -d --build
+name: tishduxtir
 services:
   db:
     image: postgres:16-alpine
