@@ -35,10 +35,12 @@ services:
     depends_on: [api]
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN .env da bo'lishi kerak}
+    # Odatda Caddy 80/443 ni o'zi egallaydi. Serverda Nginx bo'lsa, .env da HTTP_BIND/HTTPS_BIND
+    # ni ichki portlarga o'zgartiring (README: "Serverda Nginx bo'lsa").
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "${HTTP_BIND:-80}:80"
+      - "${HTTPS_BIND:-443}:443"
+      - "${HTTPS_BIND:-443}:443/udp"
     volumes:
       - caddy_data:/data
       - caddy_config:/config

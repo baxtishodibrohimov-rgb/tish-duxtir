@@ -61,6 +61,14 @@ docker compose up -d --build
 
 Birinchi marta 3–5 daqiqa davom etadi. Caddy HTTPS sertifikatini o'zi oladi.
 
+### Serverda Nginx bo'lsa
+
+Boshqa saytlar uchun Nginx 80/443 portlarni egallagan bo'lsa, Caddy faqat ichki portda ishlaydi, HTTPS'ni esa Nginx beradi.
+
+1. `.env` da: `DOMAIN=:80`, `HTTP_BIND=127.0.0.1:8090`, `HTTPS_BIND=127.0.0.1:8453`.
+2. `deploy/nginx-tishduxtir.conf` ni `/etc/nginx/sites-available/tishduxtir` ga nusxa oling, `server_name` ni tekshiring, `sites-enabled` ga ulang va `nginx -t && systemctl reload nginx`.
+3. HTTPS: `certbot --nginx -d yangi.tishduxtir.com`.
+
 ### 4. Tashkilot, filiallar va egasini yaratish
 
 ```bash

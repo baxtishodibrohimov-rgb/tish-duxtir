@@ -1,4 +1,11 @@
 # DOMAIN .env faylida: masalan tishduxtir.uz. Caddy HTTPS sertifikatini o'zi oladi (Let's Encrypt).
+{
+	servers {
+		# Oldida Nginx bo'lsa, foydalanuvchining haqiqiy IP manzili X-Forwarded-For dan olinadi.
+		trusted_proxies static private_ranges
+	}
+}
+
 {$DOMAIN} {
 	encode zstd gzip
 
