@@ -39,8 +39,10 @@ ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw --force enable
 
 ### 2. Dasturni yuklab olish
 
+Repozitoriy yopiq (private) bo'lsa, GitHub sizdan login so'raydi: parol o'rniga GitHub'da yaratilgan token (Settings → Developer settings → Personal access tokens) kiritiladi.
+
 ```bash
-git clone https://github.com/baxtishodibrohimov-rgb/tish-duxtir.git /opt/tish-duxtir
+git clone -b claude/eloquent-euler-qavaku https://github.com/baxtishodibrohimov-rgb/tish-duxtir.git /opt/tish-duxtir
 ```
 
 ```bash
