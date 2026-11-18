@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut } from 'lucide-react';
+import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell } from 'lucide-react';
 import { Link, navigate, useLocation } from '@/lib/router';
 import { useAuth, ROLE_LABEL } from '@/lib/auth';
+import { useList } from '@/lib/hooks';
 import { initials } from '@/lib/format';
 import { cx } from './ui';
-import type { Perm } from '@/lib/types';
+import { PatientForm } from './PatientForm';
+import type { Perm, Visit } from '@/lib/types';
+
+interface Reminder { id: string; status: string }
 
 const NAV: { label: string; to: string; icon: typeof Users; perm: Perm | null }[] = [
   { label: 'Jadval', to: '/', icon: CalendarDays, perm: 'schedule.view' },
@@ -32,6 +36,9 @@ export function Header() {
   const { user, me, org, branches, branch, setBranch, can, signOut } = useAuth();
   const [menu, setMenu] = useState(false);
   const [brMenu, setBrMenu] = useState(false);
+  const [newPatient, setNewPatient] = useState(false);
+  const waiting = useList<Visit>('visits', { branch_id: branch?.id, status: 'arrived' }, { enabled: !!branch });
+  const reminders = useList<Reminder>('reminders', { status: 'pending' });
   const menuRef = useOutside(menu, () => setMenu(false));
   const brRef = useOutside(brMenu, () => setBrMenu(false));
   const active = (to: string) => (to === '/' ? path === '/' : path.startsWith(to));
@@ -75,9 +82,30 @@ export function Header() {
               <span>{n.label}</span>
             </Link>
           ))}
+          {can('patients.edit') && (
+            <button type="button" onClick={() => setNewPatient(true)} aria-label="Yangi bemor" title="Yangi bemor"
+              className="inline-grid h-[30px] w-[34px] place-items-center rounded-[10px] text-primary hover:bg-primary-soft">
+              <UserPlus size={18} />
+            </button>
+          )}
         </nav>
 
-        <div ref={menuRef} className="relative ml-auto">
+        <div className="ml-auto flex items-center gap-1">
+          {can('schedule.view') && (
+            <button type="button" onClick={() => navigate('/')} aria-label="Kutish navbati" title="Kutish navbati"
+              className="relative grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg">
+              <Clock3 size={18} />
+              {(waiting.data?.length ?? 0) > 0 && <span className="absolute top-0 right-[-1px] grid h-[14px] min-w-[14px] place-items-center rounded-full bg-primary px-[3px] text-[9px] leading-none font-bold text-white">{waiting.data!.length}</span>}
+            </button>
+          )}
+          {can('patients.view') && (
+            <button type="button" onClick={() => navigate('/patients')} aria-label="Eslatmalar" title="Eslatmalar"
+              className="relative grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg">
+              <Bell size={18} />
+              {(reminders.data?.length ?? 0) > 0 && <span className="absolute top-0 right-[-1px] grid h-[14px] min-w-[14px] place-items-center rounded-full bg-bad px-[3px] text-[9px] leading-none font-bold text-white">{reminders.data!.length}</span>}
+            </button>
+          )}
+        <div ref={menuRef} className="relative">
           <button type="button" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}
             aria-label={`Mening profilim: ${user?.full_name ?? ''}`} title={user?.full_name}
             className="grid h-[30px] w-[30px] place-items-center rounded-full">
@@ -102,7 +130,9 @@ export function Header() {
             </div>
           )}
         </div>
+        </div>
       </div>
+      {newPatient && branch && <PatientForm branchId={branch.id} onClose={() => setNewPatient(false)} />}
     </header>
   );
 }
