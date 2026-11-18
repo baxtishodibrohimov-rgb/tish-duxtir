@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, CalendarPlus, Pencil, Plus, Trash2, Upload, FileText, Lock, Wallet, X, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, CalendarPlus, Pencil, Plus, Trash2, Upload, FileText, Lock, Wallet, X, AlertTriangle, UserRound, IdCard, CalendarDays, MessageSquarePlus, Bell, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
-import { ageOf, dmy, dmyhm, hm, initials, money, phoneFmt, som, WEEKDAYS } from '@/lib/format';
+import { ageOf, dmy, dmyhm, hm, initials, money, phoneFmt, som, MONTHS, WD_SHORT } from '@/lib/format';
 import { Link, useQueryParam, useTitle } from '@/lib/router';
 import type { Act, ActItem, Cashbox, Patient, PatientStatus, PriceCategory, PriceItem, RecordFile, TreatmentRecord, Visit, Warehouse } from '@/lib/types';
 import { PatientForm } from '@/components/PatientForm';
@@ -14,8 +14,8 @@ import { VISIT_STATUS } from './Schedule';
 
 type Tab = 'info' | 'visits' | 'plans' | 'history' | 'files' | 'finance';
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'info', label: 'Ma’lumotlar' }, { key: 'visits', label: 'Vizitlar' }, { key: 'plans', label: 'Davolash rejasi' },
-  { key: 'history', label: 'Kasallik tarixi' }, { key: 'files', label: 'Rentgen va fayllar' }, { key: 'finance', label: 'Moliya' },
+  { key: 'info', label: 'Vazifalar' }, { key: 'files', label: 'Hujjatlar' }, { key: 'visits', label: 'Vizitlar' },
+  { key: 'plans', label: 'Davolash rejalari' }, { key: 'history', label: 'Davolash tarixi' }, { key: 'finance', label: 'Moliya' },
 ];
 
 interface Summary { patient: Patient; billed: number; paid: number; last_visit: string | null; next_visit: string | null }
@@ -23,7 +23,7 @@ interface Summary { patient: Patient; billed: number; paid: number; last_visit: 
 export function PatientCard({ id }: { id: string }) {
   const [tab, setTab] = useQueryParam<Tab>('tab', 'visits');
   const [editing, setEditing] = useState(false);
-  const { can } = useOrg();
+  const { can, me } = useOrg();
   const sum = useQuery({ queryKey: ['patients', 'summary', id], queryFn: () => http.get<Summary>(`/api/patients/${id}/summary`) });
   useTitle(sum.data?.patient.full_name ?? 'Bemor');
 
@@ -33,29 +33,40 @@ export function PatientCard({ id }: { id: string }) {
   const debt = sum.data!.billed - sum.data!.paid;
 
   return (
-    <div className="mx-auto flex max-w-[1200px] flex-col gap-4 p-4">
-      <Link to="/patients" className="inline-flex items-center gap-1.5 self-start text-sm no-underline"><ArrowLeft size={15} /> Orqaga</Link>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <span className="text-[13px] text-sub">Karta № {p.card_number}</span>
-          <h1 className={cx('m-0 text-[22px] font-semibold', p.important_info && 'text-[#b91c1c]')}>{p.full_name || 'Ismsiz'}</h1>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-sub">
-            {p.phone && <a href={`tel:+${p.phone.replace(/\D/g, '')}`} className="text-fg no-underline">{phoneFmt(p.phone)}</a>}
-            {p.birth_date && <span>{dmy(p.birth_date)} ({ageOf(p.birth_date)} yosh)</span>}
-            {p.address && <span>{p.address}</span>}
+    <div className="mx-auto flex max-w-[1280px] flex-col gap-3 p-3 sm:p-4">
+      <section className="relative overflow-hidden rounded-[6px] border border-line bg-white shadow-[0_2px_6px_rgba(7,18,30,.05)]">
+        <span className="absolute inset-y-0 left-0 w-[3px] bg-[#18a66a]" />
+        <div className="flex min-h-[76px] items-center gap-4 px-3 pt-2 sm:px-5">
+          <div className="hidden h-[76px] w-[92px] flex-none items-end justify-center overflow-hidden rounded-t-sm bg-[#f0f4f7] sm:flex">
+            <UserRound size={72} strokeWidth={1.15} className="-mb-2 text-[#c5d0d8]" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <span className="text-[13px] text-sub">{p.card_number}</span>
+            <h1 className={cx('my-2 flex flex-wrap items-baseline gap-x-3 text-[19px] font-semibold leading-tight sm:text-[21px]', p.important_info && 'text-[#b91c1c]')}>
+              <span>{p.full_name || 'Ismsiz'}</span>
+              {p.birth_date && <span className="text-[17px] font-normal text-fg">{ageOf(p.birth_date)} yosh</span>}
+            </h1>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-sub">
+              {p.phone && <a href={`tel:+${p.phone.replace(/\D/g, '')}`} className="text-sub no-underline hover:text-fg">{phoneFmt(p.phone)}</a>}
+              {p.address && <span>{p.address}</span>}
+            </div>
+          </div>
+          <div className="flex flex-none items-center gap-3 self-start pt-2">
+            {debt > 0 && <Badge tone="red">Qarz: {som(debt)}</Badge>}
+            {debt < 0 && <Badge tone="green">Avans: {som(-debt)}</Badge>}
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-primary text-[12px] font-semibold text-white" title={me.full_name}>{initials(me.full_name)}</span>
+            <button type="button" onClick={() => setEditing(true)} aria-label="Bemor ma‘lumotlari" title="Bemor ma‘lumotlari"
+              className="grid h-8 w-8 place-items-center rounded-lg text-sub hover:bg-muted hover:text-fg"><IdCard size={19} /></button>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {debt > 0 && <Badge tone="red">Qarz: {som(debt)}</Badge>}
-          {debt < 0 && <Badge tone="green">Avans: {som(-debt)}</Badge>}
-        </div>
-      </div>
+        <UnderTabs tabs={TABS} value={tab} onChange={setTab} className="justify-end border-b-0 px-3 sm:px-5" />
+      </section>
+      <Link to="/patients" className="inline-flex items-center gap-1.5 self-start text-sm text-sub no-underline hover:text-fg"><ArrowLeft size={15} /> Orqaga</Link>
       {p.important_info && (
         <div className="flex items-start gap-2 rounded-xl border border-bad-soft bg-[#fff6f6] px-3 py-2 text-sm text-[#b91c1c]">
           <AlertTriangle size={16} className="mt-0.5 flex-none" /> {p.important_info}
         </div>
       )}
-      <UnderTabs tabs={TABS} value={tab} onChange={setTab} />
       {tab === 'info' && <InfoTab p={p} s={sum.data!} onEdit={() => setEditing(true)} canEdit={can('patients.edit')} />}
       {tab === 'visits' && <VisitsTab p={p} />}
       {tab === 'plans' && <PlansTab p={p} />}
@@ -113,33 +124,81 @@ function InfoTab({ p, s, onEdit, canEdit }: { p: Patient; s: Summary; onEdit: ()
 }
 
 function VisitsTab({ p }: { p: Patient }) {
-  const { branches, memberName } = useOrg();
+  const { branches, memberName, can, me } = useOrg();
   const visits = useList<Visit>('visits', { patient_id: p.id }, { order: 'starts_at desc' });
   const bmap = byId(branches);
+  const [deleting, setDeleting] = useState<Visit | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState(p.notes ?? '');
+  const [remOpen, setRemOpen] = useState(false);
+  const [remAt, setRemAt] = useState('');
+  const [remComment, setRemComment] = useState('');
+  const del = useAction((id: string) => db.remove('visits', id), { invalidate: ['visits'], success: 'Vizit o‘chirildi', onDone: () => setDeleting(null) });
+  const saveNote = useAction(() => db.update('patients', p.id, { notes: note }), { invalidate: ['patients'], success: 'Izoh saqlandi', onDone: () => setNoteOpen(false) });
+  const saveReminder = useAction(() => {
+    if (!remAt) throw new Error('Eslatma vaqtini kiriting');
+    return db.insert('reminders', { patient_id: p.id, assigned_to: me.user_id, remind_at: new Date(remAt).toISOString(), comment: remComment, status: 'pending' });
+  }, { invalidate: ['reminders'], success: 'Eslatma qo‘shildi', onDone: () => { setRemOpen(false); setRemAt(''); setRemComment(''); } });
   if (visits.isLoading) return <PageLoader />;
   const list = visits.data ?? [];
+  const grouped = new Map<string, Visit[]>();
+  for (const visit of list) {
+    const d = new Date(visit.starts_at);
+    const key = `${d.getFullYear()}-${d.getMonth()}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), visit]);
+  }
   return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <span className="text-sm text-sub">Jami: {list.length} ta tashrif</span>
-        <Link to="/" className="inline-flex items-center gap-1.5 text-sm no-underline"><CalendarPlus size={15} /> Jadvalga yozish</Link>
-      </div>
-      {list.length === 0 ? <Empty>Tashriflar yo‘q</Empty> : list.map((v) => {
-        const d = new Date(v.starts_at);
+    <div className="flex flex-col gap-3">
+      {list.length === 0 ? <Card><Empty>Tashriflar yo‘q</Empty></Card> : [...grouped.entries()].map(([key, rows]) => {
+        const first = new Date(rows[0]!.starts_at);
         return (
-          <div key={v.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-2.5 text-sm last:border-b-0">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: VISIT_STATUS[v.status].color }} title={VISIT_STATUS[v.status].label} />
-            <span className="w-24 font-medium">{dmy(d)}</span>
-            <span className="w-24 text-sub">{hm(v.starts_at)} – {hm(v.ends_at)}</span>
-            <span className="w-24 text-sub">{WEEKDAYS[d.getDay()]}</span>
-            <span className="min-w-[140px]">{memberName(v.doctor_id)}</span>
-            <span className="text-sub">{bmap.get(v.branch_id)?.name ?? 'Boshqa filial'}</span>
-            <span className="flex-1 truncate text-sub">{v.comment}</span>
-            <Badge tone={v.status === 'completed' ? 'green' : v.status === 'no_show' ? 'red' : v.status === 'cancelled' ? 'gray' : 'blue'}>{VISIT_STATUS[v.status].label}</Badge>
-          </div>
+          <section key={key}>
+            <h3 className="m-0 mb-2 px-2 text-[18px] font-semibold capitalize">{MONTHS[first.getMonth()]} {first.getFullYear()}</h3>
+            <div className="flex max-w-[900px] flex-col gap-1">
+              {rows.map((v) => {
+                const d = new Date(v.starts_at);
+                const doctor = memberName(v.doctor_id);
+                const tone = v.status === 'completed' ? 'bg-[#697b8e]' : v.status === 'confirmed' ? 'bg-[#13b87a]' : v.status === 'no_show' ? 'bg-bad' : v.status === 'cancelled' ? 'bg-[#9aa3ad]' : 'bg-primary';
+                return (
+                  <div key={v.id} className="grid min-h-10 grid-cols-[34px_82px_96px_28px_minmax(110px,1fr)] items-center gap-2 rounded-[3px] border border-line bg-white px-2 text-[13px] sm:grid-cols-[34px_82px_96px_28px_minmax(120px,1fr)_34px_minmax(130px,1fr)_165px_34px_34px]">
+                    <span className="grid h-7 w-7 place-items-center rounded-full bg-primary text-white"><CalendarDays size={16} /></span>
+                    <span className="font-medium">{dmy(d)}</span>
+                    <span>{hm(v.starts_at)} - {hm(v.ends_at)}</span>
+                    <span className="text-sub">{WD_SHORT[d.getDay()]}</span>
+                    <span className="truncate">{v.comment || (v.is_first_visit ? 'Birlamchi bemor' : 'Nazorat ko‘rigi')}</span>
+                    <span className="hidden h-7 w-7 place-items-center rounded-[4px] bg-[#8b5cf6] text-[10px] font-semibold text-white sm:grid">{initials(doctor)}</span>
+                    <span className="hidden truncate sm:block" title={`${doctor} · ${bmap.get(v.branch_id)?.name ?? ''}`}>{doctor}</span>
+                    <span className={cx('hidden h-6 items-center justify-center rounded-[2px] px-2 text-center text-[12px] font-medium text-white sm:flex', tone)}>{VISIT_STATUS[v.status].label}</span>
+                    {can('patients.edit', v.branch_id) ? <button type="button" onClick={() => setDeleting(v)} aria-label="O‘chirish" title="O‘chirish" className="hidden h-7 w-7 place-items-center rounded-full bg-bad text-white hover:brightness-95 sm:grid"><Trash2 size={14} /></button> : <span className="hidden sm:block" />}
+                    <Link to="/" aria-label="Tahrirlash" title="Tahrirlash" className="hidden h-7 w-7 place-items-center rounded-full bg-muted text-sub no-underline hover:text-fg sm:grid"><Pencil size={14} /></Link>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         );
       })}
-    </Card>
+
+      <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <Link to="/" className="inline-flex h-[42px] items-center justify-center gap-2 rounded-[3px] bg-primary font-medium text-white no-underline hover:bg-primary-hover sm:col-span-2"><CalendarPlus size={17} /> Qabulga yozish</Link>
+        <button type="button" onClick={() => setNoteOpen(true)} className="inline-flex h-[42px] items-center justify-center gap-2 rounded-[3px] bg-[#148b42] font-medium text-white hover:brightness-95"><MessageSquarePlus size={17} /> Izoh qo‘shish</button>
+        <button type="button" onClick={() => setRemOpen(true)} className="inline-flex h-[42px] items-center justify-center gap-2 rounded-[3px] bg-[#bf5804] font-medium text-white hover:brightness-95 sm:col-span-2"><Bell size={17} /> Eslatma qo‘shish</button>
+        <button type="button" onClick={() => window.print()} className="inline-flex h-[42px] items-center justify-center gap-2 rounded-[3px] text-sub hover:bg-muted"><Printer size={20} /> <span className="sm:hidden">Chop etish</span></button>
+      </div>
+
+      <Modal open={noteOpen} onClose={() => setNoteOpen(false)} title="Bemor uchun izoh" width={480}
+        footer={<><Button onClick={() => setNoteOpen(false)}>Bekor qilish</Button><Button variant="primary" loading={saveNote.isPending} onClick={() => saveNote.mutate(undefined)}>Saqlash</Button></>}>
+        <Textarea rows={5} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Izoh yozing…" />
+      </Modal>
+      <Modal open={remOpen} onClose={() => setRemOpen(false)} title="Eslatma qo‘shish" width={480}
+        footer={<><Button onClick={() => setRemOpen(false)}>Bekor qilish</Button><Button variant="primary" loading={saveReminder.isPending} onClick={() => saveReminder.mutate(undefined)}>Qo‘shish</Button></>}>
+        <div className="flex flex-col gap-3">
+          <Field label="Sana va vaqt">{(id) => <Input id={id} type="datetime-local" value={remAt} onChange={(e) => setRemAt(e.target.value)} />}</Field>
+          <Field label="Izoh">{(id) => <Textarea id={id} rows={3} value={remComment} onChange={(e) => setRemComment(e.target.value)} />}</Field>
+        </div>
+      </Modal>
+      <Confirm open={!!deleting} danger yes="O‘chirish" text="Bu vizitni o‘chirasizmi?" onNo={() => setDeleting(null)} onYes={() => deleting && del.mutate(deleting.id)} loading={del.isPending} />
+    </div>
   );
 }
 
