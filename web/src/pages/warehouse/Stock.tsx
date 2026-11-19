@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { PackageMinus, ArrowLeftRight, Search } from 'lucide-react';
+import { Package, PackageMinus, ArrowLeftRight, Search } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
@@ -83,7 +83,7 @@ export function Stock({ wh }: { wh: WhCtx }) {
       {groups.map(([loc, items]) => (
         <section key={loc} className="flex flex-col gap-2">
           <h2 className="m-0 text-sm font-semibold text-sub">{loc} <span className="font-normal text-faint">· {items.length}</span></h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             {items.map((p) => {
               const qty = wh.qtyOf(p.id, whId);
               const s = wh.settingOf(p.id, whId);
@@ -92,10 +92,17 @@ export function Stock({ wh }: { wh: WhCtx }) {
               const total = Math.max(qty, 0) + otherQty.reduce((a, x) => a + Math.max(x.q, 0), 0);
               const tone = qty < 0 ? 'text-bad' : qty === 0 ? 'text-faint' : min > 0 && qty <= min ? 'text-warn' : 'text-fg';
               return (
-                <div key={p.id} className="flex flex-col gap-2 rounded-card border border-line bg-white p-4">
+                <article key={p.id} className="flex min-h-[300px] flex-col overflow-hidden rounded-xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04),0_4px_12px_rgba(7,18,30,.06)]">
+                  <div className="relative grid h-28 place-items-center bg-surface">
+                    <Package size={46} strokeWidth={1.25} className="text-[#b8c6d0]" />
+                    <span className="absolute top-2 left-2 rounded-full bg-white px-2 py-1 text-[11px] text-sub shadow-sm">
+                      {otherQty.length ? `${otherQty.length + 1} ta omborda bor` : qty ? '1 ta omborda bor' : 'Hech qaysi omborda yo‘q'}
+                    </span>
+                  </div>
+                  <div className="flex flex-1 flex-col gap-2 p-4">
                   <button type="button" onClick={() => setHist(p)} aria-label={`${p.name}: tovar tarixi`} className="flex flex-col items-start gap-0.5 text-left">
-                    <span className="text-xs text-sub">{wh.brandMap.get(p.brand_id ?? '')?.name ?? '—'}{p.sku && ` · ${p.sku}`}</span>
                     <span className="font-medium hover:underline">{p.name}</span>
+                    <span className="text-xs text-sub">{wh.brandMap.get(p.brand_id ?? '')?.name ?? '—'}{p.sku && ` · ${p.sku}`}</span>
                   </button>
                   <div className="flex items-end justify-between gap-2">
                     <span className={cx('text-lg font-semibold', tone)}>{fmtQty(p, qty)}</span>
@@ -105,6 +112,7 @@ export function Stock({ wh }: { wh: WhCtx }) {
                     <span className="bg-primary" style={{ width: `${total ? (Math.max(qty, 0) / total) * 100 : 0}%` }} />
                     <span className="bg-[#9fd8ee]" style={{ width: `${total ? (100 - (Math.max(qty, 0) / total) * 100) : 0}%` }} />
                   </div>
+                  {p.pack_unit && p.pack_qty > 0 && <span className="text-xs text-sub">1 {p.pack_unit} = {p.pack_qty} {p.unit}</span>}
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-xs text-sub">{otherQty.length ? `Boshqa omborlarda: ${otherQty.reduce((a, x) => a + x.q, 0)} ${p.unit}` : 'Boshqa omborlarda yo‘q'}</span>
                     {wh.canEdit(cur) && (
@@ -116,7 +124,8 @@ export function Stock({ wh }: { wh: WhCtx }) {
                       </span>
                     )}
                   </div>
-                </div>
+                  </div>
+                </article>
               );
             })}
           </div>
