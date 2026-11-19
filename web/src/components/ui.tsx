@@ -94,6 +94,22 @@ export function UnderTabs<T extends string>({ tabs, value, onChange, className }
   );
 }
 
+/** Artifactdagi Kassa/Ombor kabi bo'limlarning ixcham ko'k modul menyusi. */
+export function ModuleTabs<T extends string>({ tabs, value, onChange, className }:
+  { tabs: { key: T; label: ReactNode }[]; value: T; onChange: (v: T) => void; className?: string }) {
+  return (
+    <div role="tablist" className={cx('flex flex-wrap items-center gap-1', className)}>
+      {tabs.map((t) => (
+        <button key={t.key} role="tab" aria-selected={t.key === value} onClick={() => onChange(t.key)}
+          className={cx('inline-flex h-5 items-center rounded-md px-2 text-sm font-medium whitespace-nowrap transition-colors',
+            t.key === value ? 'bg-primary text-white' : 'text-sub hover:bg-muted hover:text-fg')}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Kulrang fonli pill tablar (sozlamalar, jadval). */
 export function PillTabs<T extends string>({ tabs, value, onChange, small }:
   { tabs: { key: T; label: ReactNode }[]; value: T; onChange: (v: T) => void; small?: boolean }) {

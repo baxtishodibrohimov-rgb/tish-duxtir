@@ -5,7 +5,6 @@ import { useAuth, ROLE_LABEL } from '@/lib/auth';
 import { useList } from '@/lib/hooks';
 import { initials } from '@/lib/format';
 import { cx } from './ui';
-import { PatientForm } from './PatientForm';
 import type { Perm, Visit } from '@/lib/types';
 
 interface Reminder { id: string; status: string }
@@ -36,7 +35,6 @@ export function Header() {
   const { user, me, org, branches, branch, setBranch, can, signOut } = useAuth();
   const [menu, setMenu] = useState(false);
   const [brMenu, setBrMenu] = useState(false);
-  const [newPatient, setNewPatient] = useState(false);
   const waiting = useList<Visit>('visits', { branch_id: branch?.id, status: 'arrived' }, { enabled: !!branch });
   const reminders = useList<Reminder>('reminders', { status: 'pending' });
   const menuRef = useOutside(menu, () => setMenu(false));
@@ -83,7 +81,7 @@ export function Header() {
             </Link>
           ))}
           {can('patients.edit') && (
-            <button type="button" onClick={() => setNewPatient(true)} aria-label="Yangi bemor" title="Yangi bemor"
+            <button type="button" onClick={() => navigate('/patients/new')} aria-label="Yangi bemor" title="Yangi bemor"
               className="inline-grid h-[30px] w-[34px] place-items-center rounded-[10px] text-primary hover:bg-primary-soft">
               <UserPlus size={18} />
             </button>
@@ -132,7 +130,6 @@ export function Header() {
         </div>
         </div>
       </div>
-      {newPatient && branch && <PatientForm branchId={branch.id} onClose={() => setNewPatient(false)} />}
     </header>
   );
 }

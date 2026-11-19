@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { UserRound } from 'lucide-react';
 import { db } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
 import type { Patient } from '@/lib/types';
@@ -7,7 +8,8 @@ import { Button, Field, Input, Modal, Select, Textarea } from './ui';
 const EMPTY = { last_name: '', first_name: '', middle_name: '', phone: '', phone2: '', birth_date: '', gender: '', address: '', source: '', referrer: '', important_info: '', notes: '' };
 
 /** Yangi bemor yoki tahrirlash oynasi. */
-export function PatientForm({ patient, branchId, onClose, onSaved }: { patient?: Patient; branchId?: string; onClose: () => void; onSaved?: (p: Patient) => void }) {
+export function PatientForm({ patient, branchId, onClose, onSaved, page = false }:
+  { patient?: Patient; branchId?: string; onClose: () => void; onSaved?: (p: Patient) => void; page?: boolean }) {
   const [f, setF] = useState<Record<keyof typeof EMPTY, string>>(() => {
     if (!patient) return EMPTY;
     const out = { ...EMPTY };
@@ -22,9 +24,7 @@ export function PatientForm({ patient, branchId, onClose, onSaved }: { patient?:
     return patient ? db.update<Patient>('patients', patient.id, row) : db.insert<Patient>('patients', { ...row, home_branch_id: branchId ?? null });
   }, { invalidate: ['patients'], success: patient ? 'Saqlandi' : 'Bemor qo‘shildi', onDone: (p) => { onSaved?.(p); onClose(); } });
 
-  return (
-    <Modal open onClose={onClose} title={patient ? 'Bemor ma’lumotlari' : 'Yangi bemor'} width={640}
-      footer={<><Button onClick={onClose}>Bekor qilish</Button><Button variant="primary" loading={save.isPending} onClick={() => save.mutate(undefined)}>Saqlash</Button></>}>
+  const fields = (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label="Familiya">{(id) => <Input id={id} value={f.last_name} onChange={set('last_name')} />}</Field>
         <Field label="Ism">{(id) => <Input id={id} value={f.first_name} onChange={set('first_name')} />}</Field>
@@ -50,6 +50,34 @@ export function PatientForm({ patient, branchId, onClose, onSaved }: { patient?:
         </Field>
         <Field label="Izoh" className="sm:col-span-3">{(id) => <Textarea id={id} rows={2} value={f.notes} onChange={set('notes')} />}</Field>
       </div>
+  );
+
+  if (page && !patient) {
+    return (
+      <div className="px-6 pt-3 pb-6">
+        <div className="mx-auto grid max-w-[1200px] grid-cols-[64px_minmax(0,1fr)] gap-6">
+          <div className="relative mt-8 grid h-20 w-16 place-items-center overflow-hidden rounded-md bg-[#edf2f5] text-[#bdc9d2]">
+            <UserRound size={62} strokeWidth={1.15} className="translate-y-2" />
+          </div>
+          <div className="min-w-0 max-w-[980px]">
+            <h1 className="m-0 mb-5 text-xl font-medium text-[#3d4858]">Yangi bemor</h1>
+            <div className="rounded-card border border-line bg-white p-6 shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]">
+              {fields}
+              <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
+                <Button onClick={onClose}>Bekor qilish</Button>
+                <Button variant="primary" loading={save.isPending} onClick={() => save.mutate(undefined)}>✓ Saqlash</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Modal open onClose={onClose} title={patient ? 'Bemor ma’lumotlari' : 'Yangi bemor'} width={640}
+      footer={<><Button onClick={onClose}>Bekor qilish</Button><Button variant="primary" loading={save.isPending} onClick={() => save.mutate(undefined)}>Saqlash</Button></>}>
+      {fields}
     </Modal>
   );
 }
