@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useAuth } from './lib/auth';
-import { match, useLocation } from './lib/router';
+import { match, navigate, useLocation } from './lib/router';
 import { Header } from './components/Header';
 import { Empty, ErrorBox, PageLoader } from './components/ui';
 import { Login } from './pages/Login';
@@ -11,17 +11,24 @@ import { Cashbox } from './pages/Cashbox';
 import { Warehouse } from './pages/warehouse/Warehouse';
 import { Reports } from './pages/Reports';
 import { Settings } from './pages/Settings';
+import { PatientForm } from './components/PatientForm';
 import type { Perm } from './lib/types';
 
 const ROUTES: { path: string; perm: Perm | null; render: (p: Record<string, string>) => ReactNode }[] = [
   { path: '/', perm: 'schedule.view', render: () => <Schedule /> },
   { path: '/patients', perm: 'patients.view', render: () => <Patients /> },
+  { path: '/patients/new', perm: 'patients.edit', render: () => <NewPatientPage /> },
   { path: '/patients/:id', perm: 'patients.view', render: (p) => <PatientCard id={p.id!} /> },
   { path: '/cashbox', perm: 'cashbox.view', render: () => <Cashbox /> },
   { path: '/warehouse', perm: 'warehouse.view', render: () => <Warehouse /> },
   { path: '/reports', perm: 'reports.view', render: () => <Reports /> },
   { path: '/settings', perm: null, render: () => <Settings /> },
 ];
+
+function NewPatientPage() {
+  const { branch } = useAuth();
+  return <PatientForm page branchId={branch?.id} onClose={() => navigate('/patients')} onSaved={(p) => navigate(`/patients/${p.id}`)} />;
+}
 
 export function App() {
   const { user, loading, me, branch, can } = useAuth();
