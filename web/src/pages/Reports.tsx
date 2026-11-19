@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { http } from '@/lib/api';
 import { addDays, dmy, isoDate, money, som } from '@/lib/format';
-import { useTitle } from '@/lib/router';
+import { useQueryParam, useTitle } from '@/lib/router';
 import { Card, Empty, Input, PageLoader, Select, cx } from '@/components/ui';
 
 interface Overview {
@@ -15,8 +16,43 @@ interface Overview {
   byBranch: { id: string; name: string; income: number; expense: number }[];
 }
 
+const REPORT_GROUPS = [
+  { title: 'Klinika hisobotlari', items: ['Umumiy hisobot', 'Shifokorlar yuklamasi', 'Kabinetlar bandligi', 'Bajarilgan ishlar va ularning soni', 'Yangi bemorlar klinika haqida qayerdan bilgan', 'Tahrirlash jurnali', 'Xarajat kategoriyalari', 'Xarajatlar', 'Bemorni qabul qilishdagi kechikishlar', 'Birlamchi bemorlar', 'Moliyaviy hisobotlar', 'Davolash rejalari', 'Klinikadan tashqari ulashilgan bemorlar', 'Foyda va zarar'] },
+  { title: 'Jadval, eslatmalar, kutish navbati', items: ['Bemor vizitlari', 'Shifokor smenalari', 'Shifokor smenalarini nusxa ko‘chirish', 'Administrativ xodimlar smenalari', 'Assistentlar smenalari', 'Eslatmalar', 'Kutish navbati'] },
+  { title: 'Mening hisobotlarim', items: ['Mening bemorlar bo‘yicha bajarilgan ishlarim', 'Mening bajarilgan ishlarim'] },
+  { title: 'Bemorlar', items: ['Bemorlar', 'Depozitli bemorlar', 'Qarzdor bemorlar', 'Avansli bemorlar', 'Tashlab ketgan bemorlar', 'Aktlar', 'Bajarilgan ishlar', 'Bemor to‘lovlari', 'Bemor depozitlari', 'Tug‘ilgan kunlar', 'O‘chirilgan bemorlar', 'Demografiya'] },
+  { title: 'Ish haqi (ZP)', items: ['Ish haqi hisoblanmalari', 'Ish haqi berish jurnali', 'Ish haqi sozlamalari', 'Bajarilgan ishlar bo‘yicha ish haqi hisoblash'] },
+] as const;
+
+function ReportCatalog({ onOverview }: { onOverview: () => void }) {
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <div>
+        <h1 className="m-0 text-[30px] leading-9 font-semibold">Hisobotlar</h1>
+        <p className="mt-1 mb-0 text-sm text-sub">Klinika bo‘yicha statistika, moliya va xodimlar hisobotlari</p>
+      </div>
+      <div className="grid max-w-[1180px] gap-x-10 gap-y-6 lg:grid-cols-2">
+        {REPORT_GROUPS.map((group) => (
+          <section key={group.title} className="min-w-0">
+            <h2 className="m-0 mb-2 px-1 py-1 text-sm font-semibold text-primary">{group.title}</h2>
+            <div className="flex flex-col gap-1.5">
+              {group.items.map((item) => (
+                <button key={item} type="button" onClick={item === 'Umumiy hisobot' ? onOverview : undefined}
+                  className="flex min-h-10 items-center justify-between gap-3 rounded-[10px] border border-line bg-white px-3 py-2.5 text-left text-sm hover:border-primary hover:bg-surface">
+                  <span>{item}</span><ChevronRight size={15} className="flex-none text-faint" />
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function Reports() {
   useTitle('Hisobotlar');
+  const [view, setView] = useQueryParam<'catalog' | 'overview'>('view', 'catalog');
   const { branches, branch } = useOrg();
   const t = new Date();
   const [from, setFrom] = useState(isoDate(new Date(t.getFullYear(), t.getMonth(), 1)));
@@ -38,11 +74,14 @@ export function Reports() {
   const maxDay = Math.max(1, ...(d?.byDay ?? []).map((x) => Math.max(x.income, x.expense)));
   const work = d?.byDoctor.reduce((a, x) => a + x.total, 0) ?? 0;
 
+  if (view === 'catalog') return <ReportCatalog onOverview={() => setView('overview')} />;
+
   return (
-    <div className="mx-auto flex max-w-[1300px] flex-col gap-4 p-4">
+    <div className="mx-auto flex max-w-[1300px] flex-col gap-6 p-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="m-0 text-[22px] font-semibold">Hisobotlar</h1>
+          <button type="button" onClick={() => setView('catalog')} className="mb-2 inline-flex items-center gap-1 text-sm text-sub hover:text-fg"><ArrowLeft size={15} /> Barcha hisobotlar</button>
+          <h1 className="m-0 text-[30px] leading-9 font-semibold">Umumiy hisobot</h1>
           <span className="text-sm text-sub">Klinika bo‘yicha statistika, moliya va xodimlar</span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">

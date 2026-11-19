@@ -5,19 +5,17 @@ import { useList, byId } from '@/lib/hooks';
 import { dmy, phoneFmt } from '@/lib/format';
 import { Link, navigate, useTitle } from '@/lib/router';
 import type { Patient, PatientStatus } from '@/lib/types';
-import { PatientForm } from '@/components/PatientForm';
 import { Button, Empty, PageLoader, TD, TH } from '@/components/ui';
 
 const PAGE = 50;
 
 export function Patients() {
   useTitle('Bemorlar');
-  const { branch, can } = useOrg();
+  const { can } = useOrg();
   const [q, setQ] = useState('');
   const [dq, setDq] = useState('');
   const [status, setStatus] = useState('');
   const [limit, setLimit] = useState(PAGE);
-  const [creating, setCreating] = useState(false);
   useEffect(() => { const t = setTimeout(() => { setDq(q.trim()); setLimit(PAGE); }, 250); return () => clearTimeout(t); }, [q]);
 
   const statuses = useList<PatientStatus>('patient_statuses');
@@ -26,21 +24,21 @@ export function Patients() {
   const rows = (list.data ?? []).slice(0, limit);
 
   return (
-    <div className="flex flex-col gap-3 p-4">
+    <div className="flex flex-col gap-2 px-6 pt-1 pb-6">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[240px] flex-1 sm:max-w-[360px]">
+        <div className="relative min-w-[240px] flex-1 sm:max-w-[448px]">
           <label htmlFor="q" className="sr-only">Bemorni qidirish</label>
           <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-faint" />
           <input id="q" type="search" placeholder="Bemorni qidirish..." value={q} onChange={(e) => setQ(e.target.value)}
             className="h-7 w-full rounded-lg border border-line bg-white pr-2 pl-8 text-sm outline-none focus:border-primary" />
         </div>
         <select aria-label="Status" value={status} onChange={(e) => { setStatus(e.target.value); setLimit(PAGE); }}
-          className="h-7 rounded-lg border border-line bg-white px-2 text-sm">
+          className="h-7 w-[220px] rounded-lg border border-line bg-white px-2 text-sm shadow-[0_1px_2px_rgba(7,18,30,.04)]">
           <option value="">Barcha statuslar</option>
           {(statuses.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         {can('patients.edit') && (
-          <Button variant="primary" size="sm" className="ml-auto h-7" onClick={() => setCreating(true)}><Plus size={15} /> Yangi bemor</Button>
+          <Button variant="primary" size="sm" className="ml-auto h-7" onClick={() => navigate('/patients/new')}><Plus size={15} /> Yangi bemor</Button>
         )}
       </div>
 
@@ -80,7 +78,6 @@ export function Patients() {
       {(list.data?.length ?? 0) > limit && (
         <div className="flex justify-center"><Button onClick={() => setLimit(limit + PAGE)}>Yana ko‘rsatish</Button></div>
       )}
-      {creating && <PatientForm branchId={branch.id} onClose={() => setCreating(false)} onSaved={(p) => navigate(`/patients/${p.id}`)} />}
     </div>
   );
 }

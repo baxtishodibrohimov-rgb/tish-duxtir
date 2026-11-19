@@ -14,7 +14,7 @@ export const VISIT_STATUS: Record<VisitStatus, { label: string; color: string }>
   planned: { label: 'Rejalashtirilgan', color: '#0ea5e9' },
   confirmed: { label: 'Tasdiqlangan', color: '#10b981' },
   arrived: { label: 'Kelgan', color: '#f59e0b' },
-  completed: { label: 'Tugatilgan', color: '#64748b' },
+  completed: { label: 'Bajarildi', color: '#64748b' },
   no_show: { label: 'Kelmadi', color: '#ef4444' },
   cancelled: { label: 'Bekor qilingan', color: '#cbd5e1' },
 };

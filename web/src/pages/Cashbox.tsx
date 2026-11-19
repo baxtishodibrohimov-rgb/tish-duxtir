@@ -9,7 +9,7 @@ import { useQueryParam, useTitle } from '@/lib/router';
 import type { Cashbox as Box, Counterparty, ExpenseCategory, MoneyMove, Patient } from '@/lib/types';
 import { CounterpartyForm, CP_TYPE } from '@/components/CounterpartyForm';
 import { PatientPicker } from '@/components/PatientPicker';
-import { Button, Card, Empty, Field, Input, Modal, PageLoader, Select, TD, TH, UnderTabs, cx } from '@/components/ui';
+import { Button, Card, Empty, Field, Input, Modal, ModuleTabs, PageLoader, Select, TD, TH, cx } from '@/components/ui';
 
 type Sub = 'boxes' | 'ops' | 'parties' | 'expenses' | 'rates';
 const SUBS: { key: Sub; label: string }[] = [
@@ -58,9 +58,9 @@ export function Cashbox() {
   const edit = can('cashbox.edit', branch.id);
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-3 px-6 pt-1 pb-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <UnderTabs tabs={SUBS} value={sub} onChange={setSub} className="min-w-0 flex-1 border-b-0 [&_button]:h-7" />
+        <ModuleTabs tabs={SUBS} value={sub} onChange={setSub} className="min-w-0 flex-1" />
         {edit && (sub === 'boxes' || sub === 'ops') && (
           <div className="flex flex-wrap gap-1.5">
             <Button size="sm" onClick={() => setOp('income')}><ArrowDownLeft size={14} className="text-ok" /> Kirim</Button>
@@ -69,7 +69,7 @@ export function Cashbox() {
           </div>
         )}
       </div>
-      {(sub === 'boxes' || sub === 'ops' || sub === 'expenses') && <PeriodPicker value={period} onChange={setPeriod} />}
+      {(sub === 'ops' || sub === 'expenses') && <PeriodPicker value={period} onChange={setPeriod} />}
       {sub === 'boxes' && <Boxes period={period} />}
       {sub === 'ops' && <Operations period={period} />}
       {sub === 'parties' && <Parties />}
@@ -99,7 +99,7 @@ function Boxes({ period }: { period: Period }) {
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map(([l, v, c]) => (
-          <Card key={l} className="flex flex-col gap-1 p-5">
+          <Card key={l} className="flex flex-col gap-2 p-6 shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]">
             <span className="text-[13px] text-sub">{pre} — {l}</span>
             <span className={cx('text-2xl font-semibold', c)}>{som(v)}</span>
           </Card>
@@ -109,7 +109,7 @@ function Boxes({ period }: { period: Period }) {
         {d.cashboxes.map((b) => {
           const Ic = METHOD_ICON[b.method] ?? Banknote;
           return (
-            <Card key={b.cashbox_id} className="flex flex-col gap-1 p-5">
+            <Card key={b.cashbox_id} className="flex flex-col gap-2 p-6 shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]">
               <span className="flex items-center gap-2 text-[13px] text-sub"><Ic size={16} /> {b.name}</span>
               <span className="text-xl font-semibold">{som(b.balance)}</span>
               <span className="text-xs text-sub">{pre}: +{money(b.period_income)}</span>

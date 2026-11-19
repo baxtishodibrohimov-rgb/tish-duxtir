@@ -25,11 +25,12 @@ export function Settings() {
   const cur = tabs.find((t) => t.key === tab && t.show) ? tab : 'profile';
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <div className="flex flex-wrap items-center gap-1">
+    <div className="flex flex-col gap-4 px-6 pt-4 pb-6">
+      <h1 className="m-0 text-[30px] leading-9 font-semibold">Sozlamalar</h1>
+      <div role="tablist" className="inline-flex w-fit flex-wrap gap-1 rounded-[10px] bg-muted p-1">
         {tabs.filter((t) => t.show).map((t) => (
           <button key={t.key} role="tab" aria-selected={cur === t.key} type="button" onClick={() => setTab(t.key)}
-            className={cx('inline-flex h-8 items-center gap-1.5 rounded-[10px] px-3 text-sm font-medium', cur === t.key ? 'bg-nav text-nav-fg' : 'text-sub hover:bg-muted hover:text-fg')}>
+            className={cx('inline-flex h-[30px] items-center gap-2 rounded-lg px-3 text-sm font-medium', cur === t.key ? 'bg-white text-fg shadow-[0_1px_3px_rgba(7,18,30,.1)]' : 'text-sub hover:text-fg')}>
             <t.icon size={15} /> {t.label}
           </button>
         ))}
