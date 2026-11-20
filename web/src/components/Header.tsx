@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell } from 'lucide-react';
+import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell, Sparkles, X } from 'lucide-react';
 import { Link, navigate, useLocation } from '@/lib/router';
 import { useAuth, ROLE_LABEL } from '@/lib/auth';
-import { initials } from '@/lib/format';
+import { db } from '@/lib/api';
+import { useAction, useList } from '@/lib/hooks';
+import { addDays, hm, initials, isoDate, dmy } from '@/lib/format';
 import { cx } from './ui';
-import { PatientForm } from './PatientForm';
-import type { Perm } from '@/lib/types';
+import type { Perm, Reminder, WaitItem } from '@/lib/types';
 
 const NAV: { label: string; to: string; icon: typeof Users; perm: Perm | null }[] = [
   { label: 'Jadval', to: '/', icon: CalendarDays, perm: 'schedule.view' },
@@ -15,6 +16,8 @@ const NAV: { label: string; to: string; icon: typeof Users; perm: Perm | null }[
   { label: 'Hisobotlar', to: '/reports', icon: ChartColumn, perm: 'reports.view' },
   { label: 'Sozlamalar', to: '/settings', icon: Settings, perm: null },
 ];
+
+export const AUDIENCE: Record<Reminder['audience'], string> = { me: 'Men', admins: 'Administratorlar', owners: 'Rahbarlar' };
 
 function useOutside(open: boolean, close: () => void) {
   const ref = useRef<HTMLDivElement>(null);
@@ -28,23 +31,27 @@ function useOutside(open: boolean, close: () => void) {
   return ref;
 }
 
+const POP = 'absolute top-9 right-0 z-[60] flex w-[380px] max-w-[calc(100vw-24px)] flex-col gap-2 rounded-xl border border-line bg-white p-3 shadow-pop';
+const MINI = 'h-8 min-w-0 rounded-lg border border-line bg-white px-2 text-[13px]';
+const Count = ({ n, tone }: { n: number; tone: string }) => n > 0
+  ? <span className={cx('absolute top-px right-0 h-3.5 min-w-3.5 rounded-full px-[3px] text-center text-[9px] leading-[14px] font-bold text-white', tone)}>{n}</span> : null;
+
 export function Header() {
   const { path } = useLocation();
   const { user, me, org, branches, branch, setBranch, can, signOut } = useAuth();
   const [menu, setMenu] = useState(false);
   const [brMenu, setBrMenu] = useState(false);
   const [quick, setQuick] = useState<'queue' | 'reminders' | null>(null);
-  const [creatingPatient, setCreatingPatient] = useState(false);
   const menuRef = useOutside(menu, () => setMenu(false));
   const brRef = useOutside(brMenu, () => setBrMenu(false));
   const quickRef = useOutside(quick !== null, () => setQuick(null));
-  const active = (to: string) => (to === '/' ? path === '/' : path.startsWith(to));
+  const active = (to: string) => (to === '/' ? path === '/' : path.startsWith(to) && !(to === '/patients' && path === '/patients/new'));
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-white">
       <div className="flex min-h-11 flex-wrap items-center gap-x-2.5 gap-y-1 px-4">
         <div ref={brRef} className="relative">
-          <button type="button" onClick={() => setBrMenu(!brMenu)} aria-haspopup="menu" aria-expanded={brMenu}
+          <button type="button" onClick={() => setBrMenu(!brMenu)} aria-haspopup="menu" aria-expanded={brMenu} aria-label="Klinika profili"
             title={`${org?.name ?? ''} · ${branch?.name ?? ''}`}
             className="flex h-[30px] items-center gap-1.5 rounded-full pr-2 hover:bg-muted">
             <span className="grid h-[30px] w-[30px] place-items-center">
@@ -80,36 +87,16 @@ export function Header() {
             </Link>
           ))}
           {branch && can('patients.edit') && (
-            <button type="button" aria-label="Yangi bemor" title="Yangi bemor" onClick={() => setCreatingPatient(true)}
-              className="inline-grid h-[30px] w-[34px] place-items-center rounded-[10px] text-primary hover:bg-muted">
+            <Link to="/patients/new" aria-label="Yangi bemor" title="Yangi bemor"
+              className={cx('inline-grid h-[30px] w-[34px] place-items-center rounded-[10px] !text-primary no-underline', path === '/patients/new' ? 'bg-nav' : 'hover:bg-muted')}>
               <UserPlus size={18} />
-            </button>
+            </Link>
           )}
         </nav>
 
         <div ref={quickRef} className="relative ml-auto flex items-center gap-1">
-          <button type="button" aria-label="Kutish navbati" title="Kutish navbati"
-            onClick={() => setQuick(quick === 'queue' ? null : 'queue')}
-            className={cx('grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', quick === 'queue' && 'bg-muted text-fg')}>
-            <Clock3 size={18} />
-          </button>
-          <button type="button" aria-label="Eslatmalar" title="Eslatmalar"
-            onClick={() => setQuick(quick === 'reminders' ? null : 'reminders')}
-            className={cx('grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', quick === 'reminders' && 'bg-muted text-fg')}>
-            <Bell size={18} />
-          </button>
-          {quick && (
-            <div role="dialog" aria-label={quick === 'queue' ? 'Kutish navbati' : 'Eslatmalar'}
-              className="absolute top-9 right-0 z-50 flex w-[380px] max-w-[calc(100vw-24px)] flex-col gap-2 rounded-xl border border-line bg-white p-3 shadow-pop">
-              <div className="flex items-center justify-between gap-3">
-                <b className="text-sm font-semibold">{quick === 'queue' ? 'Kutish navbati' : 'Eslatmalar'}</b>
-                <span className="text-xs text-sub">{quick === 'queue' ? 'Bo‘sh vaqt chiqsa, shu yerdan yoziladi' : 'Bugun va o‘tib ketganlar'}</span>
-              </div>
-              <div className="border-t border-muted py-3 text-center text-[13px] text-sub">
-                {quick === 'queue' ? 'Navbat bo‘sh' : 'Eslatma yo‘q'}
-              </div>
-            </div>
-          )}
+          {branch && can('schedule.view') && <Queue open={quick === 'queue'} onToggle={() => setQuick(quick === 'queue' ? null : 'queue')} onClose={() => setQuick(null)} />}
+          {branch && can('patients.view') && <Reminders open={quick === 'reminders'} onToggle={() => setQuick(quick === 'reminders' ? null : 'reminders')} />}
         </div>
 
         <div ref={menuRef} className="relative">
@@ -121,7 +108,7 @@ export function Header() {
             </span>
           </button>
           {menu && (
-            <div role="menu" className="absolute top-9 right-0 z-50 w-[220px] rounded-xl border border-line bg-white p-1.5 shadow-pop">
+            <div role="menu" className="absolute top-9 right-0 z-[60] w-[220px] rounded-xl border border-line bg-white p-1.5 shadow-pop">
               <div className="mb-1 border-b border-line px-2.5 pt-2 pb-2.5">
                 <div className="text-sm font-semibold">{user?.full_name}</div>
                 <div className="text-xs text-sub">{me ? ROLE_LABEL[me.role] : ''}</div>
@@ -138,11 +125,113 @@ export function Header() {
           )}
         </div>
       </div>
-      {creatingPatient && branch && (
-        <PatientForm branchId={branch.id} onClose={() => setCreatingPatient(false)}
-          onSaved={(patient) => { setCreatingPatient(false); navigate(`/patients/${patient.id}`); }} />
+      {branch && path !== '/ai' && (
+        <Link to="/ai" aria-label="AI yordamchi" title="AI yordamchi"
+          className="fixed right-6 bottom-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-primary !text-white no-underline shadow-pop hover:bg-primary-hover">
+          <Sparkles size={24} />
+        </Link>
       )}
     </header>
   );
 }
 
+/** Kutish navbati: bo'sh vaqt chiqsa, shu yerdan qabulga yoziladi. */
+function Queue({ open, onToggle, onClose }: { open: boolean; onToggle: () => void; onClose: () => void }) {
+  const { branch, members, memberName, can } = useAuth();
+  const list = useList<WaitItem>('waiting_list', { branch_id: branch!.id });
+  const doctors = members.filter((m) => m.is_active && ['doctor', 'owner'].includes(m.role));
+  const [name, setName] = useState('');
+  const [doc, setDoc] = useState('');
+  const add = useAction(() => db.insert('waiting_list', { branch_id: branch!.id, patient_name: name.trim(), doctor_id: doc || doctors[0]?.user_id || null }),
+    { invalidate: ['waiting_list'], onDone: () => setName('') });
+  const del = useAction((id: string) => db.remove('waiting_list', id), { invalidate: ['waiting_list'] });
+  const rows = list.data ?? [];
+  const short = (uid: string | null) => { const p = memberName(uid).split(' '); return p.length > 1 ? `${p[1]} ${p[0]![0]}.` : p[0]; };
+  return (
+    <>
+      <button type="button" onClick={onToggle} aria-haspopup="dialog" aria-expanded={open} aria-label="Kutish navbati" title="Kutish navbati"
+        className={cx('relative grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', open && 'bg-muted text-fg')}>
+        <Clock3 size={18} />
+        <Count n={rows.length} tone="bg-primary" />
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Kutish navbati" className={POP}>
+          <div className="flex items-center justify-between gap-3"><b className="text-sm font-semibold">Kutish navbati</b><span className="text-xs text-sub">Bo‘sh vaqt chiqsa, shu yerdan yoziladi</span></div>
+          {rows.map((q) => (
+            <div key={q.id} className="flex items-center gap-2 border-t border-muted py-2">
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-medium">{q.patient_name || '—'}</span>
+                <span className="text-xs text-sub">{q.doctor_id ? short(q.doctor_id) : '—'} · {q.comment || 'Navbatda'}</span>
+              </span>
+              {can('schedule.edit', branch!.id) && (
+                <button type="button" onClick={() => { onClose(); navigate(`/?wait=${q.id}`); }}
+                  className="h-7 rounded-lg bg-primary-soft px-2.5 text-xs font-medium whitespace-nowrap text-[#006b93]">Qabulga yozish</button>
+              )}
+              <button type="button" onClick={() => del.mutate(q.id)} aria-label="Navbatdan olib tashlash" title="Bekor qilish"
+                className="grid h-[26px] w-[26px] place-items-center rounded-md text-faint hover:bg-muted"><X size={14} /></button>
+            </div>
+          ))}
+          {rows.length === 0 && <span className="py-2 text-[13px] text-sub">Navbat bo‘sh</span>}
+          <form className="flex gap-1.5 border-t border-muted pt-2" onSubmit={(e) => { e.preventDefault(); if (name.trim()) add.mutate(undefined); }}>
+            <input aria-label="Bemor" placeholder="Bemor ismi" value={name} onChange={(e) => setName(e.target.value)} className={cx(MINI, 'flex-1')} />
+            <select aria-label="Shifokor" value={doc} onChange={(e) => setDoc(e.target.value)} className={MINI}>
+              {doctors.map((d) => <option key={d.user_id} value={d.user_id}>{short(d.user_id)}</option>)}
+            </select>
+            <button type="submit" disabled={!name.trim() || add.isPending} className="h-8 rounded-lg bg-primary px-2.5 text-[13px] font-medium text-white">Qo‘shish</button>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Eslatmalar: bugungi va o'tib ketganlar. */
+function Reminders({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const { me, can } = useAuth();
+  const tomorrow = isoDate(addDays(new Date(), 1));
+  const list = useList<Reminder>('reminders', { 'remind_at.lt': new Date(tomorrow + 'T00:00:00').toISOString(), 'status.in': ['planned', 'done'] }, { order: 'remind_at' });
+  const [text, setText] = useState('');
+  const [aud, setAud] = useState<Reminder['audience']>('me');
+  const add = useAction(() => db.insert('reminders', { comment: text.trim(), audience: aud, assigned_to: aud === 'me' ? me?.user_id : null, remind_at: new Date().toISOString() }),
+    { invalidate: ['reminders'], onDone: () => setText('') });
+  const toggle = useAction((r: Reminder) => db.update('reminders', r.id, { status: r.status === 'done' ? 'planned' : 'done' }), { invalidate: ['reminders'] });
+  const mine = (r: Reminder) => r.audience === 'me' ? (r.assigned_to ?? r.created_by) === me?.user_id
+    : r.audience === 'owners' ? me?.role === 'owner' : ['owner', 'admin', 'curator'].includes(me?.role ?? '');
+  const today = isoDate(new Date());
+  const rows = (list.data ?? []).filter((r) => mine(r) && (r.status === 'planned' || r.remind_at.slice(0, 10) >= today));
+  const when = (s: string) => { const d = isoDate(new Date(s)); return d === today ? `Bugun ${hm(s)}` : d === isoDate(addDays(new Date(), -1)) ? 'Kecha' : dmy(s); };
+  const open_ = rows.filter((r) => r.status !== 'done').length;
+  return (
+    <>
+      <button type="button" onClick={onToggle} aria-haspopup="dialog" aria-expanded={open} aria-label="Eslatmalar" title="Eslatmalar"
+        className={cx('relative grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', open && 'bg-muted text-fg')}>
+        <Bell size={18} />
+        <Count n={open_} tone="bg-bad" />
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Eslatmalar" className={POP}>
+          <div className="flex items-center justify-between gap-3"><b className="text-sm font-semibold">Eslatmalar</b><span className="text-xs text-sub">Bugun va o‘tib ketganlar</span></div>
+          {rows.map((r) => (
+            <label key={r.id} className="flex items-start gap-2 border-t border-muted py-2">
+              <input type="checkbox" aria-label="Bajarildi" checked={r.status === 'done'} disabled={!can('patients.edit')} onChange={() => toggle.mutate(r)} className="mt-[3px]" />
+              <span className="flex min-w-0 flex-1 flex-col gap-px">
+                <span className={cx('text-sm', r.status === 'done' ? 'text-faint line-through' : 'text-fg')}>{r.comment || '—'}</span>
+                <span className="text-xs text-sub">{when(r.remind_at)} · {AUDIENCE[r.audience]}</span>
+              </span>
+            </label>
+          ))}
+          {rows.length === 0 && <span className="py-2 text-[13px] text-sub">Eslatma yo‘q</span>}
+          {can('patients.edit') && (
+            <form className="flex gap-1.5 border-t border-muted pt-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) add.mutate(undefined); }}>
+              <input aria-label="Eslatma matni" placeholder="Masalan: bemorga qo‘ng‘iroq qilish" value={text} onChange={(e) => setText(e.target.value)} className={cx(MINI, 'flex-1')} />
+              <select aria-label="Mas’ul" value={aud} onChange={(e) => setAud(e.target.value as Reminder['audience'])} className={MINI}>
+                {Object.entries(AUDIENCE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <button type="submit" disabled={!text.trim() || add.isPending} aria-label="Qo‘shish" className="h-8 rounded-lg bg-primary px-2.5 text-[13px] font-medium text-white">+</button>
+            </form>
+          )}
+        </div>
+      )}
+    </>
+  );
+}

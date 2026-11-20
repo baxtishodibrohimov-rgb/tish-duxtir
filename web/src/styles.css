@@ -25,23 +25,29 @@
   --shadow-pop: 0 4px 12px rgba(7, 18, 30, .08), 0 24px 48px -12px rgba(7, 18, 30, .12);
 }
 
-html, body, #root { height: 100%; }
-body {
-  margin: 0;
-  background: var(--color-surface);
-  color: var(--color-fg);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  -webkit-font-smoothing: antialiased;
+/* Asosiy uslublar `base` qatlamida — Tailwind utilitalari (text-*, bg-*) ularni ustidan yoza oladi. */
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--color-surface);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--color-primary); }
+  a:hover { color: var(--color-primary-hover); }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: .55; }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+  input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 }
-a { color: var(--color-primary); }
-a:hover { color: var(--color-primary-hover); }
-button { cursor: pointer; }
-button:disabled { cursor: not-allowed; opacity: .55; }
-input, select, textarea, button { font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
 
-input[type=number]::-webkit-inner-spin-button { opacity: .4; }
+@media print {
+  header, .print\:hidden { display: none !important; }
+}
 
 @layer components {
   /* To‘liq maketdagi asosiy formalar: 42px balandlik va ixcham radius. */

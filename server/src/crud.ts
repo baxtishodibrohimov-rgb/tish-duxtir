@@ -35,12 +35,15 @@ const R: Record<string, Resource> = {
   patient_statuses: { table: 'patient_statuses', scope: 'org', read: null, write: 'settings.edit',
     columns: ['name', 'color', 'kind', 'reminder_months', 'position'], filters: ['kind'], order: 'position, name' },
   patients: { table: 'patients', scope: 'org', read: 'patients.view', write: 'patients.edit',
-    columns: ['home_branch_id', 'last_name', 'first_name', 'middle_name', 'phone', 'phone2', 'birth_date', 'gender', 'address',
-      'source', 'referrer', 'important_info', 'notes', 'status_ids', 'deleted_at'],
+    columns: ['home_branch_id', 'card_number', 'last_name', 'first_name', 'middle_name', 'phone', 'phone2', 'birth_date', 'gender', 'address',
+      'source', 'referrer', 'important_info', 'notes', 'status_ids', 'deleted_at', 'email', 'discount_percent', 'curator_id', 'contact_channel',
+      'payer', 'registered_on', 'photo_file_id'],
     filters: ['home_branch_id', 'deleted_at', 'card_number', 'phone'], search: ['full_name', 'phone', 'card_number'], order: 'created_at desc' },
   visits: { table: 'visits', scope: 'branch', read: 'schedule.view', write: 'schedule.edit',
-    columns: ['branch_id', 'patient_id', 'doctor_id', 'assistant_id', 'room_id', 'starts_at', 'ends_at', 'status', 'is_first_visit', 'comment'],
+    columns: ['branch_id', 'patient_id', 'doctor_id', 'assistant_id', 'room_id', 'starts_at', 'ends_at', 'status', 'is_first_visit', 'comment', 'mood'],
     filters: ['branch_id', 'patient_id', 'doctor_id', 'room_id', 'status', 'starts_at'], order: 'starts_at', crossBranchRead: 'patient' },
+  visit_items: { table: 'visit_items', scope: 'child', parent: { resource: 'visits', fk: 'visit_id' }, read: 'schedule.view', write: 'schedule.edit',
+    columns: ['visit_id', 'price_item_id', 'name', 'price'], filters: ['visit_id'], order: 'id' },
   time_reservations: { table: 'time_reservations', scope: 'branch', read: 'schedule.view', write: 'schedule.edit',
     columns: ['branch_id', 'room_id', 'starts_at', 'ends_at', 'reason', 'color'], filters: ['branch_id', 'room_id', 'starts_at'], order: 'starts_at' },
   staff_shifts: { table: 'staff_shifts', scope: 'branch', read: 'schedule.view', write: 'schedule.edit',
@@ -64,7 +67,9 @@ const R: Record<string, Resource> = {
   act_items: { table: 'act_items', scope: 'child', parent: { resource: 'acts', fk: 'act_id' }, read: 'patients.view', write: 'patients.edit',
     columns: ['act_id', 'price_item_id', 'name', 'tooth', 'qty', 'price'], filters: ['act_id'], order: 'id' },
   reminders: { table: 'reminders', scope: 'org', read: 'patients.view', write: 'patients.edit',
-    columns: ['patient_id', 'assigned_to', 'remind_at', 'comment', 'status'], filters: ['patient_id', 'status', 'assigned_to', 'remind_at'], order: 'remind_at' },
+    columns: ['patient_id', 'assigned_to', 'remind_at', 'comment', 'status', 'audience'], filters: ['patient_id', 'status', 'assigned_to', 'remind_at', 'audience'], order: 'remind_at' },
+  waiting_list: { table: 'waiting_list', scope: 'branch', read: 'schedule.view', write: 'schedule.view',
+    columns: ['branch_id', 'patient_id', 'patient_name', 'doctor_id', 'comment'], filters: ['branch_id', 'patient_id', 'doctor_id'], order: 'created_at' },
 
   cashboxes: { table: 'cashboxes', scope: 'branch', read: null, write: 'settings.edit',
     columns: ['branch_id', 'name', 'method', 'position', 'archived'], filters: ['branch_id', 'archived'], order: 'position, name' },
@@ -111,12 +116,12 @@ const REFS: Record<string, string> = {
   act_id: 'acts', price_item_id: 'price_items', plan_id: 'treatment_plans', record_id: 'treatment_records',
   cashbox_id: 'cashboxes', to_cashbox_id: 'cashboxes', counterparty_id: 'counterparties', stock_doc_id: 'stock_docs',
   warehouse_id: 'warehouses', to_warehouse_id: 'warehouses', product_id: 'products', brand_id: 'brands',
-  parent_id: 'product_categories', member_id: 'members', doc_id: 'stock_docs',
+  parent_id: 'product_categories', member_id: 'members', doc_id: 'stock_docs', photo_file_id: 'record_files',
 };
 const CATEGORY_REF: Record<string, string> = {
   price_items: 'price_categories', products: 'product_categories', money_moves: 'expense_categories',
 };
-const USER_REFS = ['doctor_id', 'assistant_id', 'assigned_to', 'responsible_id'];
+const USER_REFS = ['doctor_id', 'assistant_id', 'assigned_to', 'responsible_id', 'curator_id'];
 
 async function checkRefs(c: Db, m: MemberCtx, res: Resource, row: Record<string, unknown>) {
   for (const [col, val] of Object.entries(row)) {

@@ -199,3 +199,26 @@ export function ErrorBox({ error }: { error: unknown }) {
 export const TH = 'h-10 px-5 text-left text-[12px] font-medium uppercase text-sub whitespace-nowrap';
 export const TD = 'h-12 px-5 text-sm border-t border-line';
 
+
+/** Maketdagi forma qatori: chapda o'ngga tekislangan yorliq, o'ngda maydon. */
+export function LRow({ label, req, htmlFor, children, width = 150, top, hint, className }:
+  { label: ReactNode; req?: boolean; htmlFor?: string; children: ReactNode; width?: number; top?: boolean; hint?: ReactNode; className?: string }) {
+  return (
+    <div className={cx('flex flex-col gap-1.5 sm:flex-row sm:gap-9', top ? 'sm:items-start' : 'sm:items-center', className)}>
+      <label htmlFor={htmlFor} style={{ width }} className={cx('flex-none text-[15px] sm:text-right', top && 'sm:pt-[9px]')}>
+        {label}{req && <span className="text-bad"> *</span>}{hint}
+      </label>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/** Kulrang tagli switch (maket: 34×20). */
+export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
+      className={cx('relative h-5 w-[34px] flex-none rounded-full transition-colors', on ? 'bg-primary' : 'bg-[#cfd8de]')}>
+      <span className={cx('absolute top-[3px] h-3.5 w-3.5 rounded-full bg-white transition-all', on ? 'left-[17px]' : 'left-[3px]')} />
+    </button>
+  );
+}

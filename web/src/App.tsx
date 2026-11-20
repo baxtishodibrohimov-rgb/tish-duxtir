@@ -7,6 +7,8 @@ import { Login } from './pages/Login';
 import { Schedule } from './pages/Schedule';
 import { Patients } from './pages/Patients';
 import { PatientCard } from './pages/PatientCard';
+import { NewPatient } from './pages/NewPatient';
+import { Assistant } from './pages/Assistant';
 import { Cashbox } from './pages/Cashbox';
 import { Warehouse } from './pages/warehouse/Warehouse';
 import { Reports } from './pages/Reports';
@@ -16,10 +18,12 @@ import type { Perm } from './lib/types';
 const ROUTES: { path: string; perm: Perm | null; render: (p: Record<string, string>) => ReactNode }[] = [
   { path: '/', perm: 'schedule.view', render: () => <Schedule /> },
   { path: '/patients', perm: 'patients.view', render: () => <Patients /> },
+  { path: '/patients/new', perm: 'patients.edit', render: () => <NewPatient /> },
   { path: '/patients/:id', perm: 'patients.view', render: (p) => <PatientCard id={p.id!} /> },
   { path: '/cashbox', perm: 'cashbox.view', render: () => <Cashbox /> },
   { path: '/warehouse', perm: 'warehouse.view', render: () => <Warehouse /> },
   { path: '/reports', perm: 'reports.view', render: () => <Reports /> },
+  { path: '/ai', perm: null, render: () => <Assistant /> },
   { path: '/settings', perm: null, render: () => <Settings /> },
 ];
 

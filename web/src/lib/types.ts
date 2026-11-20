@@ -35,15 +35,17 @@ export interface Patient {
   id: string; org_id: string; card_number: string; last_name: string; first_name: string; middle_name: string;
   home_branch_id: string | null; full_name: string; phone: string | null; phone2: string | null; birth_date: string | null; gender: 'male' | 'female' | null;
   address: string | null; source: string | null; referrer: string | null; important_info: string | null; notes: string | null;
-  status_ids: string[]; created_at: string;
+  status_ids: string[]; created_at: string; email: string | null; discount_percent: number; curator_id: string | null;
+  contact_channel: 'call' | 'tg' | 'sms' | 'wa' | null; payer: string | null; registered_on: string; photo_file_id: string | null;
 }
 
-export type VisitStatus = 'planned' | 'confirmed' | 'arrived' | 'completed' | 'no_show' | 'cancelled';
+export type VisitStatus = 'planned' | 'confirmed' | 'arrived' | 'completed' | 'no_show' | 'moved' | 'cancelled' | 'booked';
 export interface Visit {
   id: string; org_id: string; branch_id: string; patient_id: string; doctor_id: string | null; assistant_id: string | null;
   room_id: string | null; starts_at: string; ends_at: string; status: VisitStatus; is_first_visit: boolean;
-  comment: string | null;
+  comment: string | null; mood: string | null; created_at: string; created_by: string | null;
 }
+export interface VisitItem { id: string; visit_id: string; price_item_id: string | null; name: string; price: number }
 
 export interface PriceCategory { id: string; org_id: string; name: string; color_idx: number; position: number }
 export interface PriceItem {
@@ -110,3 +112,11 @@ export interface TreatmentRecord {
   tooth: string | null; diagnosis: string | null; description: string | null; created_at: string;
 }
 export interface CalcCard { id: string; org_id: string; price_item_id: string; product_id: string; qty: number }
+export interface Reminder {
+  id: string; org_id: string; patient_id: string | null; assigned_to: string | null; remind_at: string; comment: string | null;
+  status: 'planned' | 'sent' | 'cancelled' | 'done'; audience: 'me' | 'admins' | 'owners'; created_by: string | null; created_at: string;
+}
+export interface WaitItem {
+  id: string; org_id: string; branch_id: string; patient_id: string | null; patient_name: string; doctor_id: string | null;
+  comment: string | null; created_at: string;
+}

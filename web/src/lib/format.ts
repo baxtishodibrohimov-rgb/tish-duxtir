@@ -49,3 +49,17 @@ export const ageOf = (birth: string | null) => {
   if (n.getMonth() < b.getMonth() || (n.getMonth() === b.getMonth() && n.getDate() < b.getDate())) a--;
   return a;
 };
+
+/** 9 xonali raqam -> +998(90)123-45-67 (kiritish niqobi) */
+export const phoneMask = (d: string) => {
+  if (!d) return '';
+  let o = '+998(' + d.slice(0, 2);
+  if (d.length > 2) o += ')' + d.slice(2, 5);
+  if (d.length > 5) o += '-' + d.slice(5, 7);
+  if (d.length > 7) o += '-' + d.slice(7, 9);
+  return o;
+};
+/** Kiritilgan matndan 9 ta raqam (998 siz) */
+export const phoneDigits = (s: string) => s.replace(/\D/g, '').replace(/^998/, '').slice(0, 9);
+/** Saqlangan raqam -> +998(90)123-45-67 */
+export const phoneShow = (p: string | null | undefined) => (p ? phoneMask(phoneDigits(p)) : '');
