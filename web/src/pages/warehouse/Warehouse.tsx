@@ -23,18 +23,18 @@ export function Warehouse() {
   if (wh.loading) return <PageLoader />;
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <div className="flex flex-wrap items-center gap-1">
+    <div className="flex flex-col gap-3 px-6 pt-1 pb-6">
+      <div className="flex flex-wrap items-center gap-0.5 border-b border-line pb-1">
         {TABS.map((t) => (
           <button key={t.key} type="button" onClick={() => setTab(t.key)}
-            className={cx('h-8 rounded-[10px] px-3 text-sm font-medium', tab === t.key ? 'bg-nav text-nav-fg' : 'text-sub hover:bg-muted hover:text-fg')}>
+            className={cx('h-5 rounded px-2 text-sm whitespace-nowrap', tab === t.key ? 'bg-primary font-medium text-white' : 'text-[#3d4858] hover:text-fg')}>
             {t.label}
           </button>
         ))}
         {can('warehouse.admin') && (
           <button type="button" onClick={() => setTab('settings')} aria-label="Ombor sozlamalari" title="Ombor sozlamalari"
-            className={cx('ml-auto grid h-8 w-8 place-items-center rounded-[10px]', tab === 'settings' ? 'bg-nav' : 'text-sub hover:bg-muted')}>
-            <Gear size={17} />
+            className={cx('grid h-6 w-6 place-items-center rounded', tab === 'settings' ? 'bg-primary text-white' : 'text-sub hover:bg-muted')}>
+            <Gear size={16} />
           </button>
         )}
       </div>

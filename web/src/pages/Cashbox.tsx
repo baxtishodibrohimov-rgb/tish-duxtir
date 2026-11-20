@@ -1,20 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Plus, Banknote, CreditCard, Smartphone, Landmark, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Plus, Banknote, CreditCard, Smartphone, Landmark, Pencil, Trash2, Settings as Gear, WalletCards, ListChecks, Users, TrendingDown, X, UserRound, Download, Wallet } from 'lucide-react';
+import { downloadCsv } from './warehouse/Docs';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
-import { addDays, dmy, dmyhm, isoDate, money, som } from '@/lib/format';
+import { addDays, dmy, dmyhm, initials, isoDate, money, som } from '@/lib/format';
 import { useQueryParam, useTitle } from '@/lib/router';
 import type { Cashbox as Box, Counterparty, ExpenseCategory, MoneyMove, Patient } from '@/lib/types';
 import { CounterpartyForm, CP_TYPE } from '@/components/CounterpartyForm';
 import { PatientPicker } from '@/components/PatientPicker';
-import { Button, Card, Empty, Field, Input, Modal, PageLoader, Select, TD, TH, UnderTabs, cx } from '@/components/ui';
+import { Button, Card, Empty, Field, Input, Modal, PageLoader, Select, TD, TH, cx } from '@/components/ui';
 
-type Sub = 'boxes' | 'ops' | 'parties' | 'expenses' | 'rates';
-const SUBS: { key: Sub; label: string }[] = [
-  { key: 'boxes', label: 'Kassalar' }, { key: 'ops', label: 'Operatsiyalar' }, { key: 'parties', label: 'Kontragentlar' },
-  { key: 'expenses', label: 'Xarajatlar' }, { key: 'rates', label: 'Valyuta kursi' },
+type Sub = 'boxes' | 'ops' | 'parties' | 'expenses';
+const SUBS: { key: Sub; label: string; icon: typeof Banknote }[] = [
+  { key: 'boxes', label: 'Kassalar', icon: WalletCards }, { key: 'ops', label: 'Operatsiyalar', icon: ListChecks },
+  { key: 'parties', label: 'Kontragentlar', icon: Users }, { key: 'expenses', label: 'Xarajatlar', icon: TrendingDown },
 ];
 
 export const KIND: Record<MoneyMove['kind'], { label: string; tone: string }> = {
@@ -54,70 +55,75 @@ export function Cashbox() {
   const [sub, setSub] = useQueryParam<Sub>('tab', 'boxes');
   const [period, setPeriod] = useState<Period>({ from: today(), to: today() });
   const [op, setOp] = useState<MoneyMove['kind'] | null>(null);
+  const [gear, setGear] = useState(false);
   const { can, branch } = useOrg();
   const edit = can('cashbox.edit', branch.id);
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <UnderTabs tabs={SUBS} value={sub} onChange={setSub} className="min-w-0 flex-1 border-b-0 [&_button]:h-7" />
-        {edit && (sub === 'boxes' || sub === 'ops') && (
-          <div className="flex flex-wrap gap-1.5">
-            <Button size="sm" onClick={() => setOp('income')}><ArrowDownLeft size={14} className="text-ok" /> Kirim</Button>
-            <Button size="sm" onClick={() => setOp('expense')}><ArrowUpRight size={14} className="text-bad" /> Xarajat</Button>
-            <Button size="sm" onClick={() => setOp('transfer')}><ArrowLeftRight size={14} /> Kassadan kassaga</Button>
-          </div>
-        )}
+    <div className="flex flex-col gap-3 px-6 pt-1 pb-6">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b border-line pb-1">
+        {SUBS.map((t) => (
+          <button key={t.key} type="button" role="tab" aria-selected={sub === t.key} onClick={() => setSub(t.key)}
+            className={cx('inline-flex h-5 items-center gap-1.5 rounded px-2 text-sm whitespace-nowrap', sub === t.key ? 'bg-primary font-medium text-white' : 'text-[#3d4858] hover:text-fg')}>
+            <t.icon size={14} /> {t.label}
+          </button>
+        ))}
+        <span className="flex-1" />
+        {edit && (sub === 'boxes' || sub === 'ops') && <>
+          <button type="button" onClick={() => setOp('income')} className="inline-flex h-6 items-center gap-1 rounded px-2 text-[13px] text-sub hover:bg-muted"><ArrowDownLeft size={14} className="text-ok" /> Kirim</button>
+          <button type="button" onClick={() => setOp('expense')} className="inline-flex h-6 items-center gap-1 rounded px-2 text-[13px] text-sub hover:bg-muted"><ArrowUpRight size={14} className="text-bad" /> Xarajat</button>
+          <button type="button" onClick={() => setOp('transfer')} className="inline-flex h-6 items-center gap-1 rounded px-2 text-[13px] text-sub hover:bg-muted"><ArrowLeftRight size={14} /> Kassadan kassaga</button>
+        </>}
+        <button type="button" onClick={() => setGear(true)} aria-label="Kassa sozlamalari" title="Kassa sozlamalari" className="grid h-6 w-6 place-items-center rounded text-sub hover:bg-muted"><Gear size={16} /></button>
       </div>
-      {(sub === 'boxes' || sub === 'ops' || sub === 'expenses') && <PeriodPicker value={period} onChange={setPeriod} />}
-      {sub === 'boxes' && <Boxes period={period} />}
+      {sub === 'ops' && <PeriodPicker value={period} onChange={setPeriod} />}
+      {sub === 'boxes' && <Boxes />}
       {sub === 'ops' && <Operations period={period} />}
       {sub === 'parties' && <Parties />}
-      {sub === 'expenses' && <Expenses period={period} />}
-      {sub === 'rates' && <Rates />}
+      {sub === 'expenses' && <Expenses onAdd={() => setOp('expense')} />}
       {op && <MoveModal kind={op} onClose={() => setOp(null)} />}
+      {gear && (
+        <Modal open onClose={() => setGear(false)} title="Kassa sozlamalari" width={720}>
+          <div className="grid gap-4 md:grid-cols-2"><ExpenseCats /><Rates /></div>
+        </Modal>
+      )}
     </div>
   );
 }
 
 interface Summary { work_done: number; income: number; expense: number; profit: number; cashboxes: { cashbox_id: string; name: string; method: string; balance: number; period_income: number }[] }
+const METHOD_COLOR: Record<string, string> = { cash: 'text-ok', terminal: 'text-primary', click: 'text-[#9333ea]', bank: 'text-sub', other: 'text-sub' };
 
-function Boxes({ period }: { period: Period }) {
+function Boxes() {
   const { branch } = useOrg();
-  const s = useQuery({
-    queryKey: ['cash', 'summary', branch.id, period],
-    queryFn: () => http.get<Summary>(`/api/cash/summary?branch_id=${branch.id}&from=${period.from}&to=${period.to}`),
-  });
+  const t = today();
+  const s = useQuery({ queryKey: ['cash', 'summary', branch.id, t], queryFn: () => http.get<Summary>(`/api/cash/summary?branch_id=${branch.id}&from=${t}&to=${t}`) });
   if (s.isLoading) return <PageLoader />;
   const d = s.data!;
-  const isToday = period.from === today() && period.to === today();
-  const pre = isToday ? 'Bugun' : period.from === period.to ? dmy(period.from) : `${dmy(period.from)} – ${dmy(period.to)}`;
-  const cards: [string, number, string?][] = [
-    ['qilingan ish', d.work_done], ['kassaga tushgan pul', d.income], ['xarajat', d.expense, 'text-bad'], ['foyda', d.profit, d.profit >= 0 ? 'text-ok' : 'text-bad'],
+  const cards: [string, number, string][] = [
+    ['qilingan ish', d.work_done, 'text-fg'], ['kassaga tushgan pul', d.income, 'text-ok'], ['xarajat', d.expense, 'text-[#b91c1c]'], ['foyda', d.profit, d.profit >= 0 ? 'text-[#0284c7]' : 'text-[#b91c1c]'],
   ];
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap gap-3">
         {cards.map(([l, v, c]) => (
-          <Card key={l} className="flex flex-col gap-1 p-5">
-            <span className="text-[13px] text-sub">{pre} — {l}</span>
-            <span className={cx('text-2xl font-semibold', c)}>{som(v)}</span>
-          </Card>
+          <section key={l} className="app-card flex flex-[1_1_240px] flex-col gap-2 rounded-card border border-line bg-white p-6">
+            <span className="text-sm text-sub">Bugun — {l}</span>
+            <span className={cx('text-[32px] leading-tight font-bold tracking-[-0.02em]', c)}>{som(v)}</span>
+          </section>
         ))}
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {d.cashboxes.map((b) => {
           const Ic = METHOD_ICON[b.method] ?? Banknote;
           return (
-            <Card key={b.cashbox_id} className="flex flex-col gap-1 p-5">
-              <span className="flex items-center gap-2 text-[13px] text-sub"><Ic size={16} /> {b.name}</span>
+            <section key={b.cashbox_id} className="flex flex-col gap-1.5 rounded-2xl border border-line bg-white p-4" title={`Bugun: +${money(b.period_income)}`}>
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-sub"><Ic size={16} className={METHOD_COLOR[b.method]} /> {b.name}</span>
               <span className="text-xl font-semibold">{som(b.balance)}</span>
-              <span className="text-xs text-sub">{pre}: +{money(b.period_income)}</span>
-            </Card>
+            </section>
           );
         })}
       </div>
-      <p className="m-0 text-xs text-sub">Kassadagi qoldiq — barcha vaqt uchun. «Qilingan ish» — yopilgan aktlar summasi, «Kassaga tushgan pul» — to‘lovlar (qaytarilgan pul ayirilgan).</p>
     </div>
   );
 }
@@ -273,96 +279,243 @@ function MoveModal({ kind, onClose }: { kind: MoneyMove['kind']; onClose: () => 
 }
 
 interface Debt { counterparty_id: string; purchased: number; paid: number }
+interface Invoice { id: string; counterparty_id: string; inv_date: string; description: string; amount: number }
 
+/** Kontragentlar: jadval (saralash, filtr) va kontragent sahifasi (hisoblar va to'lovlar). */
 function Parties() {
   const { can } = useOrg();
   const [type, setType] = useState('');
-  const [q, setQ] = useState('');
+  const [f, setF] = useState({ name: '', phone: '', email: '', web: '', note: '' });
   const [arch, setArch] = useState(false);
   const [open, setOpen] = useState<Counterparty | 'new' | null>(null);
-  const cps = useList<Counterparty>('counterparties', { type: type || undefined, archived: arch }, { q: q || undefined });
+  const [prof, setProf] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ k: string; dir: 1 | -1 }>({ k: 'name', dir: 1 });
+  const cps = useList<Counterparty>('counterparties', { type: type || undefined, archived: arch });
+  const inv = useList<Invoice>('counterparty_invoices');
+  const pays = useList<MoneyMove>('money_moves', { kind: 'expense', 'counterparty_id.not': null }, { limit: 5000 });
   const debts = useQuery({ queryKey: ['stock', 'debts'], queryFn: () => http.get<Debt[]>('/api/stock/supplier-debts') });
-  const dm = new Map((debts.data ?? []).map((d) => [d.counterparty_id, d.purchased - d.paid]));
+  const doneOf = (id: string) => (inv.data ?? []).filter((x) => x.counterparty_id === id).reduce((a, x) => a + x.amount, 0) + (debts.data?.find((d) => d.counterparty_id === id)?.purchased ?? 0);
+  const paidOf = (id: string) => (pays.data ?? []).filter((x) => x.counterparty_id === id).reduce((a, x) => a + x.amount, 0);
+  const has = (v: string | null | undefined, n: string) => !n || (v ?? '').toLowerCase().includes(n.toLowerCase());
+  const rows = (cps.data ?? []).filter((c) => has(c.name, f.name) && has(c.phone, f.phone) && has(c.email, f.email) && has(c.website, f.web) && has(c.note, f.note))
+    .map((c) => ({ c, done: doneOf(c.id), paid: paidOf(c.id), bal: paidOf(c.id) - doneOf(c.id) }))
+    .sort((a, b) => {
+      const k = sort.k; const va = k === 'bal' ? a.bal : k === 'done' ? a.done : k === 'paid' ? a.paid : String((a.c as unknown as Record<string, unknown>)[k] ?? '');
+      const vb = k === 'bal' ? b.bal : k === 'done' ? b.done : k === 'paid' ? b.paid : String((b.c as unknown as Record<string, unknown>)[k] ?? '');
+      return (va > vb ? 1 : va < vb ? -1 : 0) * sort.dir;
+    });
+  const cur = prof ? cps.data?.find((c) => c.id === prof) : undefined;
+  if (cur) return <PartyProfile cp={cur} invoices={(inv.data ?? []).filter((x) => x.counterparty_id === cur.id)} payments={(pays.data ?? []).filter((x) => x.counterparty_id === cur.id)} purchased={debts.data?.find((d) => d.counterparty_id === cur.id)?.purchased ?? 0} onBack={() => setProf(null)} onEdit={() => setOpen(cur)} editOpen={open} onCloseEdit={() => setOpen(null)} />;
+  const COLS: [string, string][] = [['name', 'Nomi'], ['type', 'Subkategoriya'], ['phone', 'Telefon'], ['email', 'E-mail'], ['website', 'Veb-sayt'], ['note', 'Izoh'], ['bal', 'Balans'], ['done', 'Bajarilgan'], ['paid', 'To‘langan']];
+  const fi = 'h-7 w-full min-w-[60px] rounded border border-line bg-white px-1.5 text-xs font-normal';
+  const tot = rows.reduce((a, r) => a + r.bal, 0);
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input type="search" placeholder="Qidirish" value={q} onChange={(e) => setQ(e.target.value)} className="h-8 max-w-xs" aria-label="Qidirish" />
-        <select className="h-8 rounded-lg border border-line bg-white px-2 text-sm" value={type} onChange={(e) => setType(e.target.value)} aria-label="Turi">
-          <option value="">Barcha turlar</option>{Object.entries(CP_TYPE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
+      <div className="flex flex-wrap items-center gap-3">
+        {can('cashbox.edit') && <button type="button" onClick={() => setOpen('new')} className="inline-flex h-9 items-center gap-1.5 rounded-[3px] bg-primary px-3.5 text-sm text-white"><Plus size={15} /> Kontragent qo‘shish</button>}
         <label className="flex items-center gap-1.5 text-sm text-sub"><input type="checkbox" checked={arch} onChange={(e) => setArch(e.target.checked)} /> Arxiv</label>
-        {can('cashbox.edit') && <Button variant="primary" size="sm" className="ml-auto" onClick={() => setOpen('new')}><Plus size={15} /> Kontragent qo‘shish</Button>}
+        <span className="ml-auto text-sm text-sub">Ko‘rsatilganlar balansi: <b className={tot < 0 ? 'text-bad' : 'text-fg'}>{money(tot)}</b></span>
       </div>
       <Card className="overflow-x-auto">
-        {cps.data?.length === 0 ? <Empty>Kontragentlar yo‘q</Empty> : (
-          <table className="w-full border-collapse">
-            <thead className="bg-muted"><tr><th className={TH}>Nomi</th><th className={TH}>Turi</th><th className={TH}>Telefon</th><th className={TH}>STIR</th><th className={`${TH} text-right`}>Qarzimiz</th><th className={TH} /></tr></thead>
-            <tbody>
-              {(cps.data ?? []).map((c) => (
-                <tr key={c.id} className="hover:bg-surface">
-                  <td className={`${TD} font-medium`}>{c.name}</td>
-                  <td className={TD}>{CP_TYPE[c.type]}</td>
-                  <td className={TD}>{c.phone}</td>
-                  <td className={TD}>{c.inn}</td>
-                  <td className={`${TD} text-right ${(dm.get(c.id) ?? 0) > 0 ? 'font-semibold text-bad' : 'text-sub'}`}>{c.type === 'supplier' ? money(dm.get(c.id) ?? 0) : ''}</td>
-                  <td className={`${TD} w-10`}>{can('cashbox.edit') && <button type="button" aria-label="Tahrirlash" onClick={() => setOpen(c)} className="text-sub hover:text-fg"><Pencil size={15} /></button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr>{COLS.map(([k, l]) => (
+              <th key={k} className="border-b border-line p-0 text-left"><button type="button" onClick={() => setSort({ k, dir: sort.k === k ? (-sort.dir as 1 | -1) : 1 })} aria-label={`${l} bo‘yicha saralash`}
+                className="flex h-10 w-full items-center justify-between gap-1.5 px-2.5 text-sm font-semibold whitespace-nowrap">{l}<span className={cx('text-[10px]', sort.k === k ? 'text-primary' : 'text-[#c9d2d9]')}>{sort.k === k ? (sort.dir > 0 ? '▲' : '▼') : '⇅'}</span></button></th>
+            ))}<th className="border-b border-line" /></tr>
+            <tr className="bg-surface">
+              <th className="p-1.5"><input aria-label="Nomi bo‘yicha filtr" className={fi} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></th>
+              <th className="p-1.5"><select aria-label="Subkategoriya bo‘yicha filtr" className={fi} value={type} onChange={(e) => setType(e.target.value)}><option value="">Hammasi</option>{Object.entries(CP_TYPE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></th>
+              <th className="p-1.5"><input aria-label="Telefon bo‘yicha filtr" className={fi} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></th>
+              <th className="p-1.5"><input aria-label="E-mail bo‘yicha filtr" className={fi} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></th>
+              <th className="p-1.5"><input aria-label="Veb-sayt bo‘yicha filtr" className={fi} value={f.web} onChange={(e) => setF({ ...f, web: e.target.value })} /></th>
+              <th className="p-1.5"><input aria-label="Izoh bo‘yicha filtr" className={fi} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></th>
+              <th /><th /><th />
+              <th className="p-1.5"><button type="button" onClick={() => { setF({ name: '', phone: '', email: '', web: '', note: '' }); setType(''); }} aria-label="Filtrlarni tozalash" title="Filtrlarni tozalash" className="grid h-7 w-7 place-items-center rounded text-sub hover:bg-muted"><X size={14} /></button></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-sub">Filtr bo‘yicha kontragent topilmadi.</td></tr>}
+            {rows.map(({ c, done, paid, bal }) => (
+              <tr key={c.id} className="border-t border-line hover:bg-surface">
+                <td className="px-2.5 py-2"><button type="button" onClick={() => setProf(c.id)} title="Kontragent kartasini ochish" className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline"><UserRound size={14} />{c.name}</button></td>
+                <td className="px-2.5 py-2">{CP_TYPE[c.type]}</td>
+                <td className="px-2.5 py-2">{c.phone}</td>
+                <td className="px-2.5 py-2">{c.email}</td>
+                <td className="px-2.5 py-2">{c.website}</td>
+                <td className="max-w-[200px] truncate px-2.5 py-2 text-sub">{c.note}</td>
+                <td className={cx('px-2.5 py-2 text-right font-semibold whitespace-nowrap', bal < 0 ? 'text-bad' : bal > 0 ? 'text-ok' : '')}>{money(bal)}</td>
+                <td className="px-2.5 py-2 text-right whitespace-nowrap">{money(done)}</td>
+                <td className="px-2.5 py-2 text-right whitespace-nowrap">{money(paid)}</td>
+                <td className="px-2.5 py-2">{can('cashbox.edit') && <button type="button" aria-label="Tahrirlash" title="Kontragent kartasi" onClick={() => setOpen(c)} className="text-sub hover:text-fg"><Pencil size={15} /></button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </Card>
+      <div className="flex items-center gap-3 text-sm text-sub">
+        <span>Jami: <b className="text-fg">{rows.length}</b></span>
+        <button type="button" onClick={() => downloadCsv('Kontragentlar.csv', [COLS.map((c) => c[1]), ...rows.map(({ c, done, paid, bal }) => [c.name, CP_TYPE[c.type], c.phone ?? '', c.email ?? '', c.website ?? '', c.note ?? '', bal, done, paid])])}
+          aria-label="Excel (CSV) ga yuklab olish" title="Excel (CSV) ga yuklab olish" className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Download size={16} /></button>
+      </div>
       {open && <CounterpartyForm cp={open === 'new' ? undefined : open} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
-function Expenses({ period }: { period: Period }) {
-  const { branch, can } = useOrg();
+function PartyProfile({ cp, invoices, payments, purchased, onBack, onEdit, editOpen, onCloseEdit }: {
+  cp: Counterparty; invoices: Invoice[]; payments: MoneyMove[]; purchased: number; onBack: () => void; onEdit: () => void; editOpen: Counterparty | 'new' | null; onCloseEdit: () => void;
+}) {
+  const { can, branch } = useOrg();
+  const boxes = useList<Box>('cashboxes', { branch_id: branch.id, archived: false });
+  const allBoxes = useList<Box>('cashboxes');
+  const bm = byId(allBoxes.data);
+  const [md, setMd] = useState<{ kind: 'inv' | 'pay'; id?: string; date: string; desc: string; amt: string; box: string } | null>(null);
+  const invTot = invoices.reduce((a, x) => a + x.amount, 0) + purchased;
+  const payTot = payments.reduce((a, x) => a + x.amount, 0);
+  const save = useAction(() => {
+    const m = md!; const amount = Math.round(Number(m.amt) || 0);
+    if (amount <= 0) throw new Error('Summani kiriting');
+    if (m.kind === 'inv') return m.id ? db.update('counterparty_invoices', m.id, { inv_date: m.date, description: m.desc, amount }) : db.insert('counterparty_invoices', { counterparty_id: cp.id, inv_date: m.date, description: m.desc, amount });
+    return db.insert('money_moves', { kind: 'expense', cashbox_id: m.box || boxes.data?.[0]?.id, amount, counterparty_id: cp.id, note: m.desc, moved_at: new Date(m.date + 'T12:00:00').toISOString() });
+  }, { invalidate: ['counterparty_invoices', 'money_moves', 'cash', 'stock'], success: 'Saqlandi', onDone: () => setMd(null) });
+  const delInv = useAction((id: string) => db.remove('counterparty_invoices', id), { invalidate: ['counterparty_invoices'] });
+  const edit = can('cashbox.edit', branch.id);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-3 rounded-md border border-line bg-white px-4 py-3">
+        <span className="grid h-12 w-12 place-items-center rounded-full bg-muted text-sub"><UserRound size={26} /></span>
+        <h2 className="m-0 text-xl font-semibold">{cp.name}</h2>
+        {can('cashbox.edit') && <button type="button" onClick={onEdit} aria-label="Kontragent ma‘lumotlari" title="Kontragent ma‘lumotlari" className="grid h-8 w-8 place-items-center rounded text-sub hover:bg-muted"><Pencil size={16} /></button>}
+        <span className="flex-1" />
+        <span className={cx('text-base font-semibold', payTot - invTot < 0 ? 'text-bad' : 'text-ok')}>Balans: {money(payTot - invTot)} so‘m</span>
+        <button type="button" onClick={onBack} aria-label="Kontragentlar ro‘yxatiga qaytish" title="Ro‘yxatga qaytish" className="grid h-9 w-9 place-items-center rounded border border-line text-sub"><X size={16} /></button>
+      </div>
+      {edit && (
+        <div className="flex flex-wrap gap-2">
+          <span className="mr-2 self-center text-base font-medium">Moliya</span>
+          <button type="button" onClick={() => setMd({ kind: 'inv', date: today(), desc: '', amt: '', box: '' })} className="inline-flex h-10 items-center gap-1.5 rounded-[3px] bg-[#b45309] px-4 text-[15px] text-white"><Plus size={16} />Yangi hisob</button>
+          <button type="button" onClick={() => setMd({ kind: 'pay', date: today(), desc: '', amt: String(Math.max(0, invTot - payTot) || ''), box: '' })} className="inline-flex h-10 items-center gap-1.5 rounded-[3px] bg-[#15803d] px-4 text-[15px] text-white"><Wallet size={16} />Kontragentga to‘lov</button>
+        </div>
+      )}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="overflow-hidden">
+          <div className="grid grid-cols-[100px_1fr_120px_32px] gap-2 border-b border-line bg-muted px-3 py-2 text-xs font-semibold text-sub"><span>Sana</span><span>Hisoblar</span><span className="text-right">Summa</span><span /></div>
+          {purchased > 0 && <div className="grid grid-cols-[100px_1fr_120px_32px] gap-2 border-b border-line px-3 py-2 text-sm"><span className="text-sub">—</span><span>Ombor kirimlari (nakladnoylar)</span><span className="text-right">{money(purchased)}</span><span /></div>}
+          {invoices.map((x) => (
+            <div key={x.id} className="grid grid-cols-[100px_1fr_120px_32px] items-center gap-2 border-b border-line px-3 py-2 text-sm last:border-b-0">
+              <span className="text-sub">{dmy(x.inv_date)}</span><span>{x.description || '—'}</span><span className="text-right">{money(x.amount)}</span>
+              {edit ? <button type="button" onClick={() => delInv.mutate(x.id)} aria-label="Hisobni o‘chirish" className="text-faint hover:text-bad"><Trash2 size={14} /></button> : <span />}
+            </div>
+          ))}
+          <div className="flex justify-between border-t border-line px-3 py-2 text-sm font-semibold"><span>Jami hisoblar:</span><span>{money(invTot)}</span></div>
+        </Card>
+        <Card className="overflow-hidden">
+          <div className="grid grid-cols-[100px_1fr_120px] gap-2 border-b border-line bg-muted px-3 py-2 text-xs font-semibold text-sub"><span>Sana</span><span>To‘lovlar</span><span className="text-right">Summa</span></div>
+          {payments.length === 0 && <div className="px-3 py-4 text-center text-sm text-sub">To‘lov yo‘q</div>}
+          {payments.map((x) => (
+            <div key={x.id} className="grid grid-cols-[100px_1fr_120px] gap-2 border-b border-line px-3 py-2 text-sm last:border-b-0">
+              <span className="text-sub">{dmy(x.moved_at)}</span><span>{bm.get(x.cashbox_id)?.name}{x.note && <span className="text-sub"> · {x.note}</span>}</span><span className="text-right">{money(x.amount)}</span>
+            </div>
+          ))}
+          <div className="flex justify-between border-t border-line px-3 py-2 text-sm font-semibold"><span>Jami to‘lovlar:</span><span>{money(payTot)}</span></div>
+        </Card>
+      </div>
+      {invoices.length === 0 && payments.length === 0 && purchased === 0 && <div className="text-center text-sm text-sub">Hali hisob yoki to‘lov yo‘q. «Yangi hisob» yoki «Kontragentga to‘lov» tugmasini bosing.</div>}
+      {md && (
+        <Modal open onClose={() => setMd(null)} title={md.kind === 'inv' ? 'Yangi hisob' : 'Kontragentga to‘lov'} width={480}
+          footer={<><Button onClick={() => setMd(null)}>Bekor qilish</Button><span className="flex-1" /><Button variant="primary" loading={save.isPending} disabled={!(Number(md.amt) > 0) || (md.kind === 'inv' && !md.desc.trim())} onClick={() => save.mutate(undefined)}>Saqlash</Button></>}>
+          <div className="flex flex-col gap-3">
+            <Field label="Sana *">{(id) => <Input id={id} type="date" value={md.date} onChange={(e) => setMd({ ...md, date: e.target.value })} />}</Field>
+            <Field label={md.kind === 'inv' ? 'Nima uchun *' : 'Izoh'}>{(id) => <Input id={id} placeholder={md.kind === 'inv' ? 'Masalan: Material, Laboratoriya' : ''} value={md.desc} onChange={(e) => setMd({ ...md, desc: e.target.value })} />}</Field>
+            {md.kind === 'pay' && <Field label="Kassa">{(id) => <Select id={id} value={md.box} onChange={(e) => setMd({ ...md, box: e.target.value })}>{(boxes.data ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select>}</Field>}
+            <Field label="Summa *">{(id) => <Input id={id} type="number" min={0} placeholder="so‘m" value={md.amt} onChange={(e) => setMd({ ...md, amt: e.target.value })} />}</Field>
+          </div>
+        </Modal>
+      )}
+      {editOpen && <CounterpartyForm cp={editOpen === 'new' ? undefined : editOpen} onClose={onCloseEdit} />}
+    </div>
+  );
+}
+
+/** Xarajatlar jadvali (saralash va filtrlar bilan). */
+function Expenses({ onAdd }: { onAdd: () => void }) {
+  const { branch, can, members, memberName } = useOrg();
+  const [f, setF] = useState({ from: '', to: '', box: '', cp: '', cat: '', note: '', by: '', min: '', max: '' });
+  const moves = useList<MoneyMove>('money_moves', { branch_id: branch.id, kind: 'expense', ...(f.from ? { 'moved_at.gte': new Date(f.from + 'T00:00:00').toISOString() } : {}), ...(f.to ? { 'moved_at.lt': addDays(new Date(f.to + 'T00:00:00'), 1).toISOString() } : {}) }, { limit: 5000 });
+  const boxes = useList<Box>('cashboxes', { branch_id: branch.id });
+  const cps = useList<Counterparty>('counterparties');
   const cats = useList<ExpenseCategory>('expense_categories');
-  const from = new Date(period.from + 'T00:00:00').toISOString();
-  const to = new Date(addDays(new Date(period.to + 'T00:00:00'), 1)).toISOString();
-  const moves = useList<MoneyMove>('money_moves', { branch_id: branch.id, kind: 'expense', 'moved_at.gte': from, 'moved_at.lt': to }, { limit: 5000 });
+  const bm = byId(boxes.data), cm = byId(cps.data), catm = byId(cats.data);
+  const has = (v: string | null | undefined, n: string) => !n || (v ?? '').toLowerCase().includes(n.toLowerCase());
+  const rows = (moves.data ?? []).filter((m) => (!f.box || m.cashbox_id === f.box) && (!f.cp || m.counterparty_id === f.cp) && (!f.cat || m.category_id === f.cat)
+    && has(m.note, f.note) && (!f.by || m.created_by === f.by) && (!f.min || m.amount >= Number(f.min)) && (!f.max || m.amount <= Number(f.max)));
+  const fi = 'h-7 w-full min-w-[70px] rounded border border-line bg-white px-1.5 text-xs font-normal';
+  const total = rows.reduce((a, m) => a + m.amount, 0);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {can('cashbox.edit', branch.id) && <button type="button" onClick={onAdd} className="inline-flex h-9 items-center gap-1.5 rounded-[3px] bg-primary px-3.5 text-sm text-white"><Plus size={15} />Xarajat qo‘shish</button>}
+        <span className="ml-auto text-sm text-sub">{rows.length} ta xarajat · jami <b className="text-fg">{som(total)}</b></span>
+      </div>
+      <Card className="overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="text-left">{['Summa', 'Kassa', 'Kontragent', 'Kategoriya', 'Izoh', 'Sana', 'Kim yaratdi'].map((h) => <th key={h} className="h-10 border-b border-line px-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr>
+            <tr className="bg-surface">
+              <th className="p-1.5"><span className="flex gap-1"><input placeholder="dan" aria-label="Summa — dan" className={fi} value={f.min} onChange={(e) => setF({ ...f, min: e.target.value })} /><input placeholder="gacha" aria-label="Summa — gacha" className={fi} value={f.max} onChange={(e) => setF({ ...f, max: e.target.value })} /></span></th>
+              <th className="p-1.5"><select aria-label="Kassa bo‘yicha filtr" className={fi} value={f.box} onChange={(e) => setF({ ...f, box: e.target.value })}><option value="">Hammasi</option>{(boxes.data ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></th>
+              <th className="p-1.5"><select aria-label="Kontragent bo‘yicha filtr" className={fi} value={f.cp} onChange={(e) => setF({ ...f, cp: e.target.value })}><option value="">Hammasi</option>{(cps.data ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></th>
+              <th className="p-1.5"><select aria-label="Kategoriya bo‘yicha filtr" className={fi} value={f.cat} onChange={(e) => setF({ ...f, cat: e.target.value })}><option value="">Hammasi</option>{(cats.data ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></th>
+              <th className="p-1.5"><input aria-label="Izoh bo‘yicha filtr" className={fi} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></th>
+              <th className="p-1.5"><span className="flex gap-1"><input type="date" aria-label="Sana — dan" className={fi} value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /><input type="date" aria-label="Sana — gacha" className={fi} value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></span></th>
+              <th className="p-1.5"><select aria-label="Kim yaratgani bo‘yicha filtr" className={fi} value={f.by} onChange={(e) => setF({ ...f, by: e.target.value })}><option value="">Hammasi</option>{members.map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name}</option>)}</select></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-sub">Filtr bo‘yicha xarajat topilmadi.</td></tr>}
+            {rows.map((m) => (
+              <tr key={m.id} className="border-t border-line">
+                <td className="px-2.5 py-2 font-semibold whitespace-nowrap">{money(m.amount)}</td>
+                <td className="px-2.5 py-2">{bm.get(m.cashbox_id)?.name}</td>
+                <td className="px-2.5 py-2">{m.counterparty_id ? cm.get(m.counterparty_id)?.name : '—'}</td>
+                <td className="px-2.5 py-2">{m.category_id ? catm.get(m.category_id)?.name : '—'}</td>
+                <td className="px-2.5 py-2 text-sub">{m.note}</td>
+                <td className="px-2.5 py-2 whitespace-nowrap">{dmy(m.moved_at)}</td>
+                <td className="px-2.5 py-2"><span className="inline-flex items-center gap-1.5"><span className="grid h-6 w-6 place-items-center rounded-full bg-nav text-[10px] font-semibold">{initials(memberName(m.created_by))}</span>{memberName(m.created_by)}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
+function ExpenseCats() {
+  const { can } = useOrg();
+  const cats = useList<ExpenseCategory>('expense_categories');
   const [name, setName] = useState('');
   const add = useAction(() => db.insert('expense_categories', { name }), { invalidate: ['expense_categories'], onDone: () => setName('') });
   const ren = useAction(({ id, n }: { id: string; n: string }) => db.update('expense_categories', id, { name: n }), { invalidate: ['expense_categories'] });
   const arch = useAction((c: ExpenseCategory) => db.update('expense_categories', c.id, { archived: !c.archived }), { invalidate: ['expense_categories'] });
-  const totals = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const x of moves.data ?? []) m.set(x.category_id ?? '', (m.get(x.category_id ?? '') ?? 0) + x.amount);
-    return m;
-  }, [moves.data]);
-  const all = [...totals.values()].reduce((a, b) => a + b, 0);
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-      <Card className="overflow-hidden">
-        <div className="flex items-center justify-between border-b border-line px-4 py-3"><span className="font-semibold">Xarajatlar turi bo‘yicha</span><span className="font-semibold">{som(all)}</span></div>
-        {[...(cats.data ?? []), { id: '', name: 'Turi ko‘rsatilmagan', archived: false } as ExpenseCategory].filter((c) => totals.get(c.id)).map((c) => (
-          <div key={c.id || 'none'} className="flex items-center gap-3 border-b border-line px-4 py-2.5 text-sm last:border-b-0">
-            <span className="flex-1">{c.name}</span>
-            <span className="h-1.5 w-32 overflow-hidden rounded-full bg-muted"><span className="block h-full bg-primary" style={{ width: `${((totals.get(c.id) ?? 0) / (all || 1)) * 100}%` }} /></span>
-            <span className="w-32 text-right font-medium">{money(totals.get(c.id))}</span>
-          </div>
-        ))}
-        {all === 0 && <Empty>Bu davrda xarajat yo‘q</Empty>}
-      </Card>
-      <Card className="p-4">
-        <div className="mb-2 font-semibold">Xarajat turlari</div>
-        {(cats.data ?? []).map((c) => (
-          <div key={c.id} className={cx('flex items-center gap-2 py-1', c.archived && 'opacity-50')}>
-            <input defaultValue={c.name} disabled={!can('cashbox.edit')} aria-label="Nomi" onBlur={(e) => e.target.value !== c.name && ren.mutate({ id: c.id, n: e.target.value })}
-              className="h-8 flex-1 rounded-lg border border-transparent px-2 text-sm hover:border-line focus:border-primary focus:outline-none" />
-            {can('cashbox.edit') && <button type="button" onClick={() => arch.mutate(c)} className="text-xs text-sub hover:text-fg">{c.archived ? 'Tiklash' : 'Arxivlash'}</button>}
-          </div>
-        ))}
-        {can('cashbox.edit') && (
-          <div className="mt-2 flex gap-2">
-            <Input value={name} placeholder="Yangi tur, masalan: Kommunal" onChange={(e) => setName(e.target.value)} className="h-8" />
-            <Button size="sm" className="h-8" disabled={!name.trim()} onClick={() => add.mutate(undefined)}>Qo‘shish</Button>
-          </div>
-        )}
-      </Card>
-    </div>
+    <Card className="p-4">
+      <div className="mb-2 font-semibold">Xarajat kategoriyalari</div>
+      {(cats.data ?? []).map((c) => (
+        <div key={c.id} className={cx('flex items-center gap-2 py-1', c.archived && 'opacity-50')}>
+          <input defaultValue={c.name} disabled={!can('cashbox.edit')} aria-label="Nomi" onBlur={(e) => e.target.value !== c.name && ren.mutate({ id: c.id, n: e.target.value })}
+            className="h-8 flex-1 rounded-lg border border-transparent px-2 text-sm hover:border-line focus:border-primary focus:outline-none" />
+          {can('cashbox.edit') && <button type="button" onClick={() => arch.mutate(c)} className="text-xs text-sub hover:text-fg">{c.archived ? 'Tiklash' : 'Arxivlash'}</button>}
+        </div>
+      ))}
+      {can('cashbox.edit') && (
+        <div className="mt-2 flex gap-2">
+          <Input value={name} placeholder="Masalan: Kommunal" onChange={(e) => setName(e.target.value)} className="!h-8" />
+          <Button size="sm" className="h-8" disabled={!name.trim()} onClick={() => add.mutate(undefined)}>Qo‘shish</Button>
+        </div>
+      )}
+    </Card>
   );
 }
 

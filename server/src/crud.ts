@@ -79,9 +79,11 @@ const R: Record<string, Resource> = {
   cashboxes: { table: 'cashboxes', scope: 'branch', read: null, write: 'settings.edit',
     columns: ['branch_id', 'name', 'method', 'position', 'archived'], filters: ['branch_id', 'archived'], order: 'position, name' },
   counterparties: { table: 'counterparties', scope: 'org', read: null, write: 'cashbox.edit',
-    columns: ['type', 'name', 'phone', 'email', 'address', 'contact_person', 'inn', 'bank_name', 'bank_account', 'mfo', 'note', 'archived'],
+    columns: ['type', 'name', 'phone', 'email', 'address', 'contact_person', 'inn', 'bank_name', 'bank_account', 'mfo', 'note', 'archived', 'website'],
     filters: ['type', 'archived'], search: ['name', 'phone', 'inn'], order: 'name',
     extraWrite: { perm: 'warehouse.admin', when: (r) => r.type === 'supplier' } },
+  counterparty_invoices: { table: 'counterparty_invoices', scope: 'org', read: 'cashbox.view', write: 'cashbox.edit',
+    columns: ['counterparty_id', 'inv_date', 'description', 'amount'], filters: ['counterparty_id'], order: 'inv_date desc, created_at desc' },
   expense_categories: { table: 'expense_categories', scope: 'org', read: null, write: 'cashbox.edit',
     columns: ['name', 'archived'], filters: ['archived'], order: 'name' },
   currency_rates: { table: 'currency_rates', scope: 'org', read: null, write: 'cashbox.edit',
@@ -223,7 +225,7 @@ function buildWhere(m: MemberCtx, res: Resource, query: Record<string, string>, 
 }
 
 // Bo'sh bo'lishi mumkin bo'lgan, lekin NULL bo'lmaydigan matn ustunlari.
-const KEEP_EMPTY = new Set(['name', 'first_name', 'last_name', 'middle_name', 'title', 'reason', 'patient_name', 'text']);
+const KEEP_EMPTY = new Set(['name', 'first_name', 'last_name', 'middle_name', 'title', 'reason', 'patient_name', 'text', 'description']);
 
 // jsonb ustunlar: pg massivni Postgres massivi deb yuboradi, shuning uchun JSON matnga aylantiramiz.
 const JSON_COLS = new Set(['stages']);

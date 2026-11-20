@@ -57,7 +57,7 @@ export interface Cashbox { id: string; org_id: string; branch_id: string; name: 
 
 export type CounterpartyType = 'supplier' | 'doctor' | 'assistant' | 'lab' | 'technician' | 'other';
 export interface Counterparty {
-  id: string; org_id: string; type: CounterpartyType; name: string; phone: string | null; email: string | null;
+  id: string; org_id: string; type: CounterpartyType; name: string; phone: string | null; email: string | null; website: string | null;
   address: string | null; contact_person: string | null; inn: string | null; bank_name: string | null;
   bank_account: string | null; mfo: string | null; note: string | null; archived: boolean;
 }

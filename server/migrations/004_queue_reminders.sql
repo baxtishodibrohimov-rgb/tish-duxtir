@@ -94,3 +94,19 @@ create table patient_notes (
   created_at timestamptz not null default now()
 );
 create index on patient_notes (patient_id);
+
+-- ---------------------------------------------------------------------
+-- Kassa → Kontragentlar: hisoblar (kontragent bizga qo'ygan hisob, masalan laboratoriya ishi)
+-- ---------------------------------------------------------------------
+alter table counterparties add column if not exists website text;
+create table counterparty_invoices (
+  id              uuid primary key default gen_random_uuid(),
+  org_id          uuid not null references orgs(id) on delete cascade,
+  counterparty_id uuid not null references counterparties(id) on delete cascade,
+  inv_date        date not null default current_date,
+  description     text not null default '',
+  amount          bigint not null check (amount > 0),
+  created_by      uuid default app_uid() references users(id),
+  created_at      timestamptz not null default now()
+);
+create index on counterparty_invoices (counterparty_id);

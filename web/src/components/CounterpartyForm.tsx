@@ -9,7 +9,7 @@ export const CP_TYPE: Record<CounterpartyType, string> = {
 };
 
 type F = Omit<Counterparty, 'id' | 'org_id'>;
-const EMPTY: F = { type: 'other', name: '', phone: '', email: '', address: '', contact_person: '', inn: '', bank_name: '', bank_account: '', mfo: '', note: '', archived: false };
+const EMPTY: F = { type: 'other', name: '', phone: '', email: '', address: '', contact_person: '', inn: '', bank_name: '', bank_account: '', mfo: '', note: '', archived: false, website: '' };
 
 /** Kontragent oynasi. Ombordan ochilganda tur "Yetkazib beruvchi" bilan qotiriladi. */
 export function CounterpartyForm({ cp, fixedType, onClose }: { cp?: Counterparty; fixedType?: CounterpartyType; onClose: () => void }) {
@@ -41,6 +41,7 @@ export function CounterpartyForm({ cp, fixedType, onClose }: { cp?: Counterparty
           <Field label="Mas’ul shaxs">{(id) => <Input id={id} value={f.contact_person ?? ''} onChange={s('contact_person')} />}</Field>
           <Field label="Telefon">{(id) => <Input id={id} type="tel" value={f.phone ?? ''} onChange={s('phone')} />}</Field>
           <Field label="Email">{(id) => <Input id={id} type="email" value={f.email ?? ''} onChange={s('email')} />}</Field>
+          <Field label="Veb-sayt" className="sm:col-span-2">{(id) => <Input id={id} value={f.website ?? ''} onChange={s('website')} />}</Field>
           <Field label="Manzil" className="sm:col-span-2">{(id) => <Input id={id} value={f.address ?? ''} onChange={s('address')} />}</Field>
           <Field label="Izoh" className="sm:col-span-2">{(id) => <Textarea id={id} rows={2} value={f.note ?? ''} onChange={s('note')} />}</Field>
           {cp && <Switch checked={f.archived} onChange={(v) => setF({ ...f, archived: v })} label="Arxivda" />}

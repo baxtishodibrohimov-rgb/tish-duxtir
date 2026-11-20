@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { PackageMinus, ArrowLeftRight, Search } from 'lucide-react';
+import { Package, Recycle, Move, List as ListIcon } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
@@ -10,22 +10,26 @@ import type { Product, StockDoc, StockHistoryRow } from '@/lib/types';
 import { Drawer, Empty, Spinner, cx } from '@/components/ui';
 import { DOC_TYPE, WRITEOFF_REASON, fmtQty, type WhCtx } from './common';
 
-type Filter = 'all' | 'low' | 'out' | 'neg';
+type Filter = 'all' | 'ok' | 'low' | 'out' | 'neg';
 
 export function Stock({ wh }: { wh: WhCtx }) {
   const { branch } = useOrg();
   const mine = wh.warehouses.filter((w) => w.branch_id === branch.id);
   const others = wh.warehouses.filter((w) => w.branch_id !== branch.id);
   const tabs = [...mine, ...others];
-  const [whId, setWhId] = useState(() => mine.find((w) => w.is_main)?.id ?? tabs[0]?.id ?? '');
+  const [whId, setWhId] = useState<string>('all');
   const [q, setQ] = useState('');
   const [f, setF] = useState<Filter>('all');
   const [hist, setHist] = useState<Product | null>(null);
-  const cur = wh.whMap.get(whId);
+  const all = whId === 'all';
+  const actWh = all ? mine.find((w) => w.is_main) ?? mine[0] : wh.whMap.get(whId);
+  const qtyIn = (p: string) => (all ? wh.warehouses.reduce((a, w) => a + wh.qtyOf(p, w.id), 0) : wh.qtyOf(p, whId));
+  const minIn = (p: string) => (all ? wh.warehouses.reduce((a, w) => a + (wh.settingOf(p, w.id)?.min_qty ?? 0), 0) : wh.settingOf(p, whId)?.min_qty ?? 0);
 
   const quick = useAction(async ({ p, type }: { p: Product; type: 'writeoff' | 'transfer' }) => {
-    const target = type === 'transfer' ? wh.warehouses.find((w) => w.id !== whId && w.branch_id === cur?.branch_id) ?? wh.warehouses.find((w) => w.id !== whId) : undefined;
-    const d = await db.insert<StockDoc>('stock_docs', { type, warehouse_id: whId, to_warehouse_id: target?.id ?? null, reason: type === 'writeoff' ? 'usage' : null });
+    if (!actWh) throw new Error('Ombor tanlanmagan');
+    const target = type === 'transfer' ? wh.warehouses.find((w) => w.id !== actWh.id && w.branch_id === actWh.branch_id) ?? wh.warehouses.find((w) => w.id !== actWh.id) : undefined;
+    const d = await db.insert<StockDoc>('stock_docs', { type, warehouse_id: actWh.id, to_warehouse_id: target?.id ?? null, reason: type === 'writeoff' ? 'usage' : null });
     await db.insert('stock_doc_lines', { doc_id: d.id, product_id: p.id, qty: 1 });
     return d;
   }, { invalidate: ['stock_docs'], onDone: (d) => navigate(`/warehouse?tab=docs&type=${d.type}&doc=${d.id}`) });
@@ -34,95 +38,87 @@ export function Stock({ wh }: { wh: WhCtx }) {
     const ql = q.trim().toLowerCase();
     const items = wh.products.filter((p) => {
       if (p.archived) return false;
-      const s = wh.settingOf(p.id, whId);
-      const qty = wh.qtyOf(p.id, whId);
-      if (s && !s.visible && qty === 0) return false;
-      if (!s && qty === 0 && f === 'all' && !ql) {
-        // Bu omborda hech qachon bo'lmagan tovarni ko'rsatmaymiz
-        if (!wh.balances.some((b) => b.product_id === p.id && b.warehouse_id === whId)) return false;
+      const qty = qtyIn(p.id), min = minIn(p.id);
+      if (!all) {
+        const s = wh.settingOf(p.id, whId);
+        if (s && !s.visible && qty === 0) return false;
+        if (!s && qty === 0 && !wh.balances.some((b) => b.product_id === p.id && b.warehouse_id === whId) && !ql) return false;
       }
       if (ql && !`${p.name} ${p.sku ?? ''} ${p.barcode ?? ''} ${wh.brandMap.get(p.brand_id ?? '')?.name ?? ''}`.toLowerCase().includes(ql)) return false;
-      const min = s?.min_qty ?? 0;
+      if (f === 'ok') return qty > min && qty > 0;
       if (f === 'low') return min > 0 && qty <= min && qty > 0;
-      if (f === 'out') return qty === 0;
+      if (f === 'out') return qty <= 0;
       if (f === 'neg') return qty < 0;
       return true;
     });
     const m = new Map<string, Product[]>();
     for (const p of items) {
-      const loc = wh.settingOf(p.id, whId)?.location || 'Joyi ko‘rsatilmagan';
+      const loc = (all ? wh.warehouses.map((w) => wh.settingOf(p.id, w.id)?.location).find(Boolean) : wh.settingOf(p.id, whId)?.location) || 'Joyi ko‘rsatilmagan';
       m.set(loc, [...(m.get(loc) ?? []), p]);
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'uz'));
-  }, [wh, whId, q, f]);
+  }, [wh, whId, q, f]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!tabs.length) return <Empty>Omborlar yo‘q. Sozlamalarda ombor qo‘shing.</Empty>;
+  const UNDER = (on: boolean) => cx('-mb-px h-9 border-b-2 px-2.5 text-[15px] whitespace-nowrap', on ? 'border-primary font-medium text-fg' : 'border-transparent text-sub hover:text-fg');
 
   return (
-    <div className="flex flex-col gap-3">
-      <div role="tablist" className="flex flex-wrap gap-x-5 border-b border-line">
-        {tabs.map((w) => (
-          <button key={w.id} role="tab" aria-selected={w.id === whId} onClick={() => setWhId(w.id)}
-            className={cx('-mb-px h-9 border-b-2 text-sm font-medium whitespace-nowrap', w.id === whId ? 'border-primary' : 'border-transparent text-sub hover:text-fg')}>
-            {wh.whLabel(w)}{w.is_main && <span className="ml-1 text-xs text-faint">(asosiy)</span>}
-          </button>
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[260px] flex-1 sm:max-w-md">
-          <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-faint" />
-          <input type="search" aria-label="Qidirish" placeholder="Tovar, brend yoki artikul bo‘yicha qidirish" value={q} onChange={(e) => setQ(e.target.value)}
-            className="h-8 w-full rounded-lg border border-line bg-white pr-2 pl-8 text-sm outline-none focus:border-primary" />
+    <div className="flex flex-col gap-4">
+      <div className="-mt-3 flex flex-wrap items-center gap-3 border-b border-line">
+        <div role="tablist" className="flex flex-wrap items-center gap-1">
+          <button type="button" role="tab" aria-selected={all} onClick={() => setWhId('all')} className={UNDER(all)}>Barcha omborlar</button>
+          {tabs.map((w) => <button key={w.id} type="button" role="tab" aria-selected={w.id === whId} onClick={() => setWhId(w.id)} className={UNDER(w.id === whId)}>{wh.whLabel(w)}</button>)}
         </div>
-        <select aria-label="Holat" value={f} onChange={(e) => setF(e.target.value as Filter)} className="h-8 rounded-lg border border-line bg-white px-2 text-sm">
-          <option value="all">Hammasi</option><option value="low">Kam qolgan</option><option value="out">Tugagan</option><option value="neg">Manfiy qoldiq</option>
-        </select>
+        <div className="ml-auto flex flex-wrap gap-2 pb-1.5">
+          <input type="search" aria-label="Tovar, brend yoki artikul bo‘yicha qidirish" placeholder="Tovar, brend yoki artikul bo‘yicha qidirish" value={q} onChange={(e) => setQ(e.target.value)}
+            className="h-8 w-80 max-w-full rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-primary" />
+          <select aria-label="Holat" value={f} onChange={(e) => setF(e.target.value as Filter)} className="h-8 w-40 rounded-lg border border-line bg-white px-2 text-sm">
+            <option value="all">Hammasi</option><option value="ok">Yetarli</option><option value="low">Kam qolgan</option><option value="out">Tugagan</option><option value="neg">Manfiy qoldiq</option>
+          </select>
+        </div>
       </div>
 
-      {groups.length === 0 && <Empty>Tovar topilmadi. Tovarlar kirim nakladnoyi orqali omborga tushadi.</Empty>}
+      {groups.length === 0 && <div className="rounded-2xl border border-dashed border-line p-10 text-center text-sm text-sub">Hech narsa topilmadi. Tovarlar kirim nakladnoyi orqali omborga tushadi.</div>}
       {groups.map(([loc, items]) => (
-        <section key={loc} className="flex flex-col gap-2">
-          <h2 className="m-0 text-sm font-semibold text-sub">{loc} <span className="font-normal text-faint">· {items.length}</span></h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        <section key={loc} className="flex flex-col gap-3">
+          <h2 className="m-0 mt-1 flex items-center gap-2.5 text-xl font-medium"><ListIcon size={22} className="text-primary" />{loc}</h2>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
             {items.map((p) => {
-              const qty = wh.qtyOf(p.id, whId);
-              const s = wh.settingOf(p.id, whId);
-              const min = s?.min_qty ?? 0;
-              const otherQty = wh.warehouses.filter((w) => w.id !== whId).map((w) => ({ w, q: wh.qtyOf(p.id, w.id) })).filter((x) => x.q !== 0);
-              const total = Math.max(qty, 0) + otherQty.reduce((a, x) => a + Math.max(x.q, 0), 0);
-              const tone = qty < 0 ? 'text-bad' : qty === 0 ? 'text-faint' : min > 0 && qty <= min ? 'text-warn' : 'text-fg';
+              const qty = qtyIn(p.id), min = minIn(p.id);
+              const st = qty <= 0 ? 'out' : min > 0 && qty <= min ? 'low' : 'ok';
+              const nWh = wh.warehouses.filter((w) => wh.qtyOf(p.id, w.id) > 0).length;
+              const other = all ? 0 : wh.warehouses.filter((w) => w.id !== whId).reduce((a, w) => a + Math.max(0, wh.qtyOf(p.id, w.id)), 0);
+              const bar = all ? (nWh > 0 ? `${nWh} ta omborda bor` : 'Hech qaysi omborda yo‘q') : other > 0 ? `Boshqa omborlarda: ${other} ${p.unit}` : 'Boshqa omborlarda yo‘q';
+              const barColor = (all ? nWh === 0 : qty <= 0 && other === 0) ? '#f59e0b' : '#94a3b8';
+              const qtyText = qty < 0 ? `Minusda: ${qty} ${p.unit}` : qty === 0 ? 'Tugagan' : `${fmtQty(p, qty).split(' (')[0]}${st === 'low' ? ' · kam qoldi' : ''}`;
+              const can = wh.canEdit(actWh);
               return (
-                <div key={p.id} className="flex flex-col gap-2 rounded-card border border-line bg-white p-4">
-                  <button type="button" onClick={() => setHist(p)} aria-label={`${p.name}: tovar tarixi`} className="flex flex-col items-start gap-0.5 text-left">
-                    <span className="text-xs text-sub">{wh.brandMap.get(p.brand_id ?? '')?.name ?? '—'}{p.sku && ` · ${p.sku}`}</span>
-                    <span className="font-medium hover:underline">{p.name}</span>
+                <article key={p.id} className={cx('flex flex-col overflow-hidden rounded-xl border border-line shadow-[0_1px_2px_rgba(7,18,30,.04),0_4px_12px_rgba(7,18,30,.06)]', st === 'out' ? 'bg-[#fff5f5]' : 'bg-white')}>
+                  <div className="flex h-[26px] items-center px-3 text-[13px] font-semibold text-white" style={{ background: barColor }}>{bar}</div>
+                  <button type="button" onClick={() => setHist(p)} aria-label={`${p.name}: tovar tarixi`} className="grid h-[170px] w-full place-items-center">
+                    <Package size={88} strokeWidth={1.4} className={st === 'out' ? 'text-[#e5c4c4]' : 'text-[#c3ccd5]'} />
                   </button>
-                  <div className="flex items-end justify-between gap-2">
-                    <span className={cx('text-lg font-semibold', tone)}>{fmtQty(p, qty)}</span>
-                    {min > 0 && <span className="text-xs text-sub">min: {min}</span>}
+                  <div className="flex flex-1 flex-col gap-1 px-3 pb-3">
+                    <div className={cx('self-end font-semibold', st === 'out' ? 'text-lg text-bad' : st === 'low' ? 'text-[15px] text-warn' : 'text-[15px] text-primary-hover')}>{qtyText}</div>
+                    <div className={cx('text-[15px] font-semibold', st === 'out' ? 'text-bad' : 'text-primary-hover')}>{p.name}</div>
+                    <div className={cx('text-xs', st === 'out' ? 'text-[#f87171]' : 'text-sub')}>{wh.brandMap.get(p.brand_id ?? '')?.name ?? '—'}{p.sku && ` · ${p.sku}`}</div>
+                    {p.pack_unit && p.pack_qty > 1 && <div className={cx('text-xs', st === 'out' ? 'text-[#f87171]' : 'text-sub')}>1 {p.pack_unit} = {p.pack_qty} {p.unit}</div>}
                   </div>
-                  <div className="flex h-1.5 overflow-hidden rounded-full bg-muted" title={otherQty.map((x) => `${wh.whLabel(x.w)}: ${fmtQty(p, x.q)}`).join('\n')}>
-                    <span className="bg-primary" style={{ width: `${total ? (Math.max(qty, 0) / total) * 100 : 0}%` }} />
-                    <span className="bg-[#9fd8ee]" style={{ width: `${total ? (100 - (Math.max(qty, 0) / total) * 100) : 0}%` }} />
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs text-sub">{otherQty.length ? `Boshqa omborlarda: ${otherQty.reduce((a, x) => a + x.q, 0)} ${p.unit}` : 'Boshqa omborlarda yo‘q'}</span>
-                    {wh.canEdit(cur) && (
-                      <span className="flex gap-1">
-                        <button type="button" aria-label="Hisobdan chiqarish" title="Hisobdan chiqarish" onClick={() => quick.mutate({ p, type: 'writeoff' })}
-                          className="grid h-7 w-7 place-items-center rounded-lg text-sub hover:bg-muted"><PackageMinus size={15} /></button>
-                        {wh.warehouses.length > 1 && <button type="button" aria-label="Ko‘chirish" title="Boshqa omborga ko‘chirish" onClick={() => quick.mutate({ p, type: 'transfer' })}
-                          className="grid h-7 w-7 place-items-center rounded-lg text-sub hover:bg-muted"><ArrowLeftRight size={15} /></button>}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                  {can && (
+                    <div className="flex gap-1.5 px-2 pb-2">
+                      <button type="button" aria-label="Hisobdan chiqarish" title="Hisobdan chiqarish" onClick={() => quick.mutate({ p, type: 'writeoff' })}
+                        className={cx('grid h-9 flex-1 place-items-center rounded-md text-white', st === 'out' ? 'bg-[#fca5a5]' : 'bg-primary')}><Recycle size={18} /></button>
+                      {wh.warehouses.length > 1 && <button type="button" aria-label="Ko‘chirish" title="Boshqa omborga ko‘chirish" onClick={() => quick.mutate({ p, type: 'transfer' })}
+                        className={cx('grid h-9 flex-1 place-items-center rounded-md text-white', st === 'out' ? 'bg-[#fca5a5]' : 'bg-primary')}><Move size={18} /></button>}
+                    </div>
+                  )}
+                </article>
               );
             })}
           </div>
         </section>
       ))}
-      {hist && <History wh={wh} product={hist} whId={whId} onClose={() => setHist(null)} />}
+      {hist && <History wh={wh} product={hist} whId={all ? actWh?.id ?? '' : whId} onClose={() => setHist(null)} />}
     </div>
   );
 }
