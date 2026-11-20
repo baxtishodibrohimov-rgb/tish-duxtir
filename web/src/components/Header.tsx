@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut } from 'lucide-react';
+import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell } from 'lucide-react';
 import { Link, navigate, useLocation } from '@/lib/router';
 import { useAuth, ROLE_LABEL } from '@/lib/auth';
 import { initials } from '@/lib/format';
 import { cx } from './ui';
+import { PatientForm } from './PatientForm';
 import type { Perm } from '@/lib/types';
 
 const NAV: { label: string; to: string; icon: typeof Users; perm: Perm | null }[] = [
@@ -32,8 +33,11 @@ export function Header() {
   const { user, me, org, branches, branch, setBranch, can, signOut } = useAuth();
   const [menu, setMenu] = useState(false);
   const [brMenu, setBrMenu] = useState(false);
+  const [quick, setQuick] = useState<'queue' | 'reminders' | null>(null);
+  const [creatingPatient, setCreatingPatient] = useState(false);
   const menuRef = useOutside(menu, () => setMenu(false));
   const brRef = useOutside(brMenu, () => setBrMenu(false));
+  const quickRef = useOutside(quick !== null, () => setQuick(null));
   const active = (to: string) => (to === '/' ? path === '/' : path.startsWith(to));
 
   return (
@@ -75,9 +79,40 @@ export function Header() {
               <span>{n.label}</span>
             </Link>
           ))}
+          {branch && can('patients.edit') && (
+            <button type="button" aria-label="Yangi bemor" title="Yangi bemor" onClick={() => setCreatingPatient(true)}
+              className="inline-grid h-[30px] w-[34px] place-items-center rounded-[10px] text-primary hover:bg-muted">
+              <UserPlus size={18} />
+            </button>
+          )}
         </nav>
 
-        <div ref={menuRef} className="relative ml-auto">
+        <div ref={quickRef} className="relative ml-auto flex items-center gap-1">
+          <button type="button" aria-label="Kutish navbati" title="Kutish navbati"
+            onClick={() => setQuick(quick === 'queue' ? null : 'queue')}
+            className={cx('grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', quick === 'queue' && 'bg-muted text-fg')}>
+            <Clock3 size={18} />
+          </button>
+          <button type="button" aria-label="Eslatmalar" title="Eslatmalar"
+            onClick={() => setQuick(quick === 'reminders' ? null : 'reminders')}
+            className={cx('grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', quick === 'reminders' && 'bg-muted text-fg')}>
+            <Bell size={18} />
+          </button>
+          {quick && (
+            <div role="dialog" aria-label={quick === 'queue' ? 'Kutish navbati' : 'Eslatmalar'}
+              className="absolute top-9 right-0 z-50 flex w-[380px] max-w-[calc(100vw-24px)] flex-col gap-2 rounded-xl border border-line bg-white p-3 shadow-pop">
+              <div className="flex items-center justify-between gap-3">
+                <b className="text-sm font-semibold">{quick === 'queue' ? 'Kutish navbati' : 'Eslatmalar'}</b>
+                <span className="text-xs text-sub">{quick === 'queue' ? 'Bo‘sh vaqt chiqsa, shu yerdan yoziladi' : 'Bugun va o‘tib ketganlar'}</span>
+              </div>
+              <div className="border-t border-muted py-3 text-center text-[13px] text-sub">
+                {quick === 'queue' ? 'Navbat bo‘sh' : 'Eslatma yo‘q'}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div ref={menuRef} className="relative">
           <button type="button" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}
             aria-label={`Mening profilim: ${user?.full_name ?? ''}`} title={user?.full_name}
             className="grid h-[30px] w-[30px] place-items-center rounded-full">
@@ -103,6 +138,11 @@ export function Header() {
           )}
         </div>
       </div>
+      {creatingPatient && branch && (
+        <PatientForm branchId={branch.id} onClose={() => setCreatingPatient(false)}
+          onSaved={(patient) => { setCreatingPatient(false); navigate(`/patients/${patient.id}`); }} />
+      )}
     </header>
   );
 }
+
