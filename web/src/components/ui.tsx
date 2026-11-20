@@ -17,8 +17,8 @@ export function Button({ variant = 'outline', size = 'md', loading, className, c
   ButtonHTMLAttributes<HTMLButtonElement> & { variant?: BtnVariant; size?: 'sm' | 'md'; loading?: boolean }) {
   return (
     <button type="button" {...p} disabled={p.disabled || loading}
-      className={cx('inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] font-medium transition-colors',
-        size === 'sm' ? 'h-7 px-2.5 text-[13px]' : 'h-9 px-3.5 text-sm', BTN[variant], className)}>
+      className={cx('app-button inline-flex items-center justify-center gap-1.5 whitespace-nowrap font-medium transition-colors',
+        size === 'sm' ? 'app-button-sm' : 'app-button-md', BTN[variant], className)}>
       {loading && <Loader2 size={14} className="animate-spin" />}
       {children}
     </button>
@@ -28,13 +28,13 @@ export function Button({ variant = 'outline', size = 'md', loading, className, c
 export function IconButton({ label, className, children, ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
     <button type="button" aria-label={label} title={label} {...p}
-      className={cx('inline-grid h-8 w-8 place-items-center rounded-lg text-sub hover:bg-muted hover:text-fg', className)}>
+      className={cx('inline-grid h-[30px] w-[30px] place-items-center rounded-md text-sub hover:bg-muted hover:text-fg', className)}>
       {children}
     </button>
   );
 }
 
-const FIELD = 'h-9 w-full min-w-0 rounded-[10px] border border-line bg-white px-3 text-sm outline-none focus:border-primary placeholder:text-faint';
+const FIELD = 'app-field w-full min-w-0 border border-line bg-white px-3 outline-none shadow-[0_1px_2px_rgba(7,18,30,.04)] focus:border-primary placeholder:text-faint';
 
 export function Input({ className, ...p }: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...p} className={cx(FIELD, className)} />;
@@ -50,7 +50,7 @@ export function Field({ label, hint, children, className }: { label: string; hin
   const id = useId();
   return (
     <div className={cx('flex flex-col gap-1', className)}>
-      <label htmlFor={id} className="text-[13px] font-medium text-sub">{label}</label>
+      <label htmlFor={id} className="text-sm font-medium text-sub">{label}</label>
       {children(id)}
       {hint && <span className="text-xs text-faint">{hint}</span>}
     </div>
@@ -70,7 +70,7 @@ export function Switch({ checked, onChange, label }: { checked: boolean; onChang
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx('rounded-card border border-line bg-white', className)}>{children}</div>;
+  return <div className={cx('app-card rounded-card border border-line bg-white', className)}>{children}</div>;
 }
 
 export function Badge({ tone = 'gray', children }: { tone?: 'gray' | 'green' | 'red' | 'amber' | 'blue'; children: ReactNode }) {
@@ -122,16 +122,16 @@ export function Modal({ open, onClose, title, children, footer, width = 520 }:
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[rgba(7,18,30,.35)] p-4 pt-[8vh]"
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[rgba(7,18,30,.35)] p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div ref={ref} role="dialog" aria-modal="true" style={{ maxWidth: width }}
-        className="w-full rounded-card border border-line bg-white shadow-pop">
-        <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-2">
-          <h2 className="m-0 text-[17px] font-semibold">{title}</h2>
+        className="app-modal w-full border border-line bg-white">
+        <div className="flex items-center justify-between gap-3 border-b border-line px-5 pt-[18px] pb-[14px]">
+          <h2 className="m-0 text-xl font-medium">{title}</h2>
           <IconButton label="Yopish" onClick={onClose}><X size={18} /></IconButton>
         </div>
-        <div className="px-5 pb-4">{children}</div>
-        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
+        <div className="px-5 py-5">{children}</div>
+        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 pt-[18px] pb-5">{footer}</div>}
       </div>
     </div>
   );
@@ -196,5 +196,6 @@ export function ErrorBox({ error }: { error: unknown }) {
 }
 
 /** Jadval uchun umumiy uslublar */
-export const TH = 'h-9 px-3 text-left text-[12px] font-semibold uppercase tracking-wide text-sub whitespace-nowrap';
-export const TD = 'h-11 px-3 text-sm border-t border-line';
+export const TH = 'h-10 px-5 text-left text-[12px] font-medium uppercase text-sub whitespace-nowrap';
+export const TD = 'h-12 px-5 text-sm border-t border-line';
+
