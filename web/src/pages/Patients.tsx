@@ -26,16 +26,16 @@ export function Patients() {
   const rows = (list.data ?? []).slice(0, limit);
 
   return (
-    <div className="flex flex-col gap-3 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[240px] flex-1 sm:max-w-[360px]">
+    <div className="flex flex-col gap-2 px-6 pt-1 pb-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[240px] flex-1 sm:max-w-[448px]">
           <label htmlFor="q" className="sr-only">Bemorni qidirish</label>
           <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-faint" />
           <input id="q" type="search" placeholder="Bemorni qidirish..." value={q} onChange={(e) => setQ(e.target.value)}
-            className="h-7 w-full rounded-lg border border-line bg-white pr-2 pl-8 text-sm outline-none focus:border-primary" />
+            className="h-7 w-full rounded-lg border border-line bg-white pr-2 pl-8 text-sm shadow-[0_1px_2px_rgba(7,18,30,.04)] outline-none focus:border-primary" />
         </div>
         <select aria-label="Status" value={status} onChange={(e) => { setStatus(e.target.value); setLimit(PAGE); }}
-          className="h-7 rounded-lg border border-line bg-white px-2 text-sm">
+            className="h-7 w-[220px] rounded-lg border border-line bg-white px-2.5 text-sm shadow-[0_1px_2px_rgba(7,18,30,.04)]">
           <option value="">Barcha statuslar</option>
           {(statuses.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
@@ -44,7 +44,7 @@ export function Patients() {
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-card border border-line bg-white">
+      <div className="app-card overflow-x-auto rounded-card border border-line bg-white">
         {list.isLoading ? <PageLoader /> : rows.length === 0 ? <Empty>{dq ? 'Hech narsa topilmadi' : 'Hali bemorlar yo‘q'}</Empty> : (
           <table className="w-full border-collapse">
             <thead className="bg-muted">
@@ -84,3 +84,4 @@ export function Patients() {
     </div>
   );
 }
+
