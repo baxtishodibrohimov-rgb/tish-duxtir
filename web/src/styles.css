@@ -21,6 +21,7 @@
   --color-warn: #b45309;
   --color-warn-soft: #fef3c7;
   --radius-card: 20px;
+  --shadow-card: 0 1px 2px rgba(7, 18, 30, .04), 0 2px 8px rgba(7, 18, 30, .04);
   --shadow-pop: 0 4px 12px rgba(7, 18, 30, .08), 0 24px 48px -12px rgba(7, 18, 30, .12);
 }
 
@@ -42,8 +43,39 @@ input, select, textarea, button { font: inherit; color: inherit; }
 
 input[type=number]::-webkit-inner-spin-button { opacity: .4; }
 
+@layer components {
+  /* To‘liq maketdagi asosiy formalar: 42px balandlik va ixcham radius. */
+  .app-field {
+    height: 42px;
+    border-radius: 3px;
+    font-size: 15px;
+  }
+  .app-button {
+    border-radius: 3px;
+  }
+  .app-button-md {
+    height: 42px;
+    padding-inline: 16px;
+    font-size: 15px;
+  }
+  .app-button-sm {
+    height: 28px;
+    padding-inline: 12px;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .app-card {
+    box-shadow: var(--shadow-card);
+  }
+  .app-modal {
+    border-radius: 6px;
+    box-shadow: 0 24px 48px -12px rgba(7, 18, 30, .35);
+  }
+}
+
 /* Kategoriya daraxti chiziqlari */
 .tree-children { position: relative; margin-left: 9px; padding-left: 12px; }
 .tree-children::before { content: ""; position: absolute; left: 0; top: 0; bottom: 14px; border-left: 1px dotted #9aa3ad; }
 .tree-node { position: relative; }
 .tree-children > .tree-node::before { content: ""; position: absolute; left: -12px; top: 15px; width: 10px; border-top: 1px dotted #9aa3ad; }
+
