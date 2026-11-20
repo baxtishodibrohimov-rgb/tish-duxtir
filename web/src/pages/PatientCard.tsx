@@ -1,29 +1,33 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, CalendarPlus, Pencil, Plus, Trash2, Upload, FileText, Lock, Wallet, X, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, CalendarDays, CalendarPlus, FilePen, Bell, Printer, Trash2, Pencil, Upload, FileText, Lock, Wallet, X, AlertTriangle, IdCard, Search, Plus, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
-import { ageOf, dmy, dmyhm, hm, initials, money, phoneFmt, som, WEEKDAYS } from '@/lib/format';
+import { ageOf, dmy, dmyhm, hm, initials, isoDate, money, phoneShow, som, MONTHS, WD_SHORT } from '@/lib/format';
 import { Link, useQueryParam, useTitle } from '@/lib/router';
-import type { Act, ActItem, Cashbox, Patient, PatientStatus, PriceCategory, PriceItem, RecordFile, TreatmentRecord, Visit, Warehouse } from '@/lib/types';
-import { PatientForm } from '@/components/PatientForm';
-import { Badge, Button, Card, Confirm, Empty, ErrorBox, Field, Input, Modal, PageLoader, Select, Textarea, UnderTabs, cx } from '@/components/ui';
-import { VISIT_STATUS } from './Schedule';
+import { VISIT_STATUS } from '@/lib/visit';
+import type { Act, ActItem, Cashbox, Patient, PriceCategory, PriceItem, RecordFile, Reminder, Room, TreatmentRecord, Visit, Warehouse } from '@/lib/types';
+import { NewPatient } from './NewPatient';
+import { Plans } from '@/components/Plans';
+import { VisitModal } from '@/components/VisitModal';
+import { Badge, Button, Card, Confirm, Empty, ErrorBox, Field, Input, Modal, PageLoader, Select, Textarea, cx } from '@/components/ui';
 
-type Tab = 'info' | 'visits' | 'plans' | 'history' | 'files' | 'finance';
+export { VISIT_STATUS } from '@/lib/visit';
+
+type Tab = 'tasks' | 'docs' | 'visits' | 'plans' | 'history' | 'finance' | 'info';
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'info', label: 'Ma’lumotlar' }, { key: 'visits', label: 'Vizitlar' }, { key: 'plans', label: 'Davolash rejasi' },
-  { key: 'history', label: 'Kasallik tarixi' }, { key: 'files', label: 'Rentgen va fayllar' }, { key: 'finance', label: 'Moliya' },
+  { key: 'tasks', label: 'Vazifalar' }, { key: 'docs', label: 'Hujjatlar' }, { key: 'visits', label: 'Vizitlar' },
+  { key: 'plans', label: 'Davolash rejalari' }, { key: 'history', label: 'Davolash tarixi' }, { key: 'finance', label: 'Moliya' },
 ];
 
 interface Summary { patient: Patient; billed: number; paid: number; last_visit: string | null; next_visit: string | null }
 
 export function PatientCard({ id }: { id: string }) {
-  const [tab, setTab] = useQueryParam<Tab>('tab', 'visits');
-  const [editing, setEditing] = useState(false);
-  const { can } = useOrg();
+  const [tab0, setTab] = useQueryParam<Tab>('tab', 'visits');
+  const tab: Tab = (tab0 as string) === 'files' ? 'docs' : tab0;
+  const { members, memberName } = useOrg();
   const sum = useQuery({ queryKey: ['patients', 'summary', id], queryFn: () => http.get<Summary>(`/api/patients/${id}/summary`) });
   useTitle(sum.data?.patient.full_name ?? 'Bemor');
 
@@ -31,185 +35,195 @@ export function PatientCard({ id }: { id: string }) {
   if (sum.error) return <ErrorBox error={sum.error} />;
   const p = sum.data!.patient;
   const debt = sum.data!.billed - sum.data!.paid;
+  const age = ageOf(p.birth_date);
+  const doc = p.curator_id ?? null;
+  const docColor = members.find((m) => m.user_id === doc)?.color ?? '#00a1db';
 
   return (
-    <div className="mx-auto flex max-w-[1200px] flex-col gap-4 p-4">
-      <Link to="/patients" className="inline-flex items-center gap-1.5 self-start text-sm no-underline"><ArrowLeft size={15} /> Orqaga</Link>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <span className="text-[13px] text-sub">Karta № {p.card_number}</span>
-          <h1 className={cx('m-0 text-[22px] font-semibold', p.important_info && 'text-[#b91c1c]')}>{p.full_name || 'Ismsiz'}</h1>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-sub">
-            {p.phone && <a href={`tel:+${p.phone.replace(/\D/g, '')}`} className="text-fg no-underline">{phoneFmt(p.phone)}</a>}
-            {p.birth_date && <span>{dmy(p.birth_date)} ({ageOf(p.birth_date)} yosh)</span>}
-            {p.address && <span>{p.address}</span>}
+    <main className="flex flex-col gap-4 px-3 pt-2.5 pb-6">
+      <section className="app-card flex items-stretch gap-4 rounded-md border border-l-4 border-line bg-white pt-2 pr-5 pl-2"
+        style={{ borderLeftColor: debt > 0 ? '#dc2626' : '#15803d' }}>
+        <div className="grid h-[110px] w-28 flex-none place-items-end self-end overflow-hidden rounded-t bg-muted">
+          {p.photo_file_id ? <img src={`/api/files/${p.photo_file_id}`} alt="" className="h-full w-full object-cover" /> : <UserRound size={96} strokeWidth={1} className="-mb-3 fill-[#cfd8de] text-[#cfd8de]" />}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col justify-between pt-2 pb-3">
+          <span className="text-sm text-sub">{p.card_number}</span>
+          <div className="flex flex-col gap-1">
+            <h1 className="m-0 text-lg font-semibold" style={{ color: debt > 0 ? '#dc2626' : undefined }}>
+              {p.full_name || 'Ismsiz'} {age !== null && <span className="ml-2.5 font-medium text-fg">{age} yosh</span>}
+            </h1>
+            {p.phone && <a href={`tel:+${p.phone.replace(/\D/g, '')}`} className="text-sm !text-sub no-underline">{phoneShow(p.phone)}</a>}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {debt > 0 && <Badge tone="red">Qarz: {som(debt)}</Badge>}
-          {debt < 0 && <Badge tone="green">Avans: {som(-debt)}</Badge>}
+        <div className="flex flex-col items-end justify-between gap-2 pt-2">
+          <div className="flex items-center gap-3.5">
+            {debt > 0 && <Badge tone="red">Qarz: {som(debt)}</Badge>}
+            {debt < 0 && <Badge tone="green">Avans: {som(-debt)}</Badge>}
+            {doc && <span title={`Kurator: ${memberName(doc)}`} className="grid h-9 w-9 place-items-center rounded-full text-xs font-semibold text-white" style={{ background: docColor }}>{initials(memberName(doc))}</span>}
+            <button type="button" onClick={() => setTab(tab === 'info' ? 'visits' : 'info')} aria-label="Bemor ma‘lumotlari" title="Bemor ma‘lumotlari"
+              className={cx('grid h-9 w-9 place-items-center rounded-md text-sub hover:bg-muted', tab === 'info' && 'bg-muted')}><IdCard size={22} /></button>
+          </div>
+          <div role="tablist" className="flex flex-wrap justify-end">
+            {TABS.map((t) => (
+              <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
+                className={cx('-mb-px h-10 border-b-[3px] px-4 text-[15px] whitespace-nowrap', tab === t.key ? 'border-primary text-fg' : 'border-transparent text-[#3d4858] hover:text-fg')}>{t.label}</button>
+            ))}
+          </div>
         </div>
-      </div>
+      </section>
       {p.important_info && (
-        <div className="flex items-start gap-2 rounded-xl border border-bad-soft bg-[#fff6f6] px-3 py-2 text-sm text-[#b91c1c]">
+        <div className="flex items-start gap-2 rounded-md border border-bad-soft bg-[#fff6f6] px-3 py-2 text-sm text-[#b91c1c]">
           <AlertTriangle size={16} className="mt-0.5 flex-none" /> {p.important_info}
         </div>
       )}
-      <UnderTabs tabs={TABS} value={tab} onChange={setTab} />
-      {tab === 'info' && <InfoTab p={p} s={sum.data!} onEdit={() => setEditing(true)} canEdit={can('patients.edit')} />}
+      <Link to="/patients" className="inline-flex items-center gap-1.5 self-start text-sm !text-sub no-underline print:hidden"><ArrowLeft size={15} /> Orqaga</Link>
+      {tab === 'info' && <NewPatient patient={p} onDone={() => setTab('visits')} />}
+      {tab === 'tasks' && <TasksTab p={p} />}
       {tab === 'visits' && <VisitsTab p={p} />}
-      {tab === 'plans' && <PlansTab p={p} />}
+      {tab === 'plans' && <Plans patient={p} />}
       {tab === 'history' && <HistoryTab p={p} />}
-      {tab === 'files' && <FilesTab p={p} />}
+      {tab === 'docs' && <FilesTab p={p} />}
       {tab === 'finance' && <FinanceTab p={p} s={sum.data!} />}
-      {editing && <PatientForm patient={p} onClose={() => setEditing(false)} />}
-    </div>
+    </main>
   );
 }
 
-function InfoTab({ p, s, onEdit, canEdit }: { p: Patient; s: Summary; onEdit: () => void; canEdit: boolean }) {
-  const { branches } = useOrg();
-  const statuses = useList<PatientStatus>('patient_statuses');
-  const toggle = useAction((sid: string) => db.update('patients', p.id, {
-    status_ids: p.status_ids.includes(sid) ? p.status_ids.filter((x) => x !== sid) : [...p.status_ids, sid],
-  }), { invalidate: ['patients'] });
-  const rows: [string, string][] = [
-    ['Familiya, ism, sharif', p.full_name], ['Asosiy telefon', phoneFmt(p.phone)], ['Qo‘shimcha telefon', phoneFmt(p.phone2)],
-    ['Tug‘ilgan sana', dmy(p.birth_date)], ['Jinsi', p.gender === 'male' ? 'Erkak' : p.gender === 'female' ? 'Ayol' : ''],
-    ['Manzil', p.address ?? ''], ['Qayerdan bildi', p.source ?? ''], ['Kim yo‘lladi', p.referrer ?? ''],
-    ['Birinchi filial', branches.find((b) => b.id === p.home_branch_id)?.name ?? ''], ['Ro‘yxatga olingan', dmy(p.created_at)],
-    ['Oxirgi tashrif', s.last_visit ? dmyhm(s.last_visit) : ''], ['Keyingi tashrif', s.next_visit ? dmyhm(s.next_visit) : ''],
-    ['Izoh', p.notes ?? ''],
-  ];
+// ---------------- Vazifalar ----------------
+function TasksTab({ p }: { p: Patient }) {
+  const { can, me } = useOrg();
+  const list = useList<Reminder>('reminders', { patient_id: p.id, 'status.in': ['planned', 'done'] }, { order: 'remind_at' });
+  const [text, setText] = useState('');
+  const [date, setDate] = useState(isoDate(new Date(Date.now() + 3 * 86400000)));
+  const add = useAction(() => db.insert('reminders', { patient_id: p.id, comment: text.trim(), remind_at: new Date(date + 'T09:00:00').toISOString(), assigned_to: me.user_id, audience: 'me' }),
+    { invalidate: ['reminders'], onDone: () => setText('') });
+  const toggle = useAction((r: Reminder) => db.update('reminders', r.id, { status: r.status === 'done' ? 'planned' : 'done' }), { invalidate: ['reminders'] });
+  const rows = list.data ?? [];
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-      <Card className="p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="m-0 text-base font-semibold">Shaxsiy ma’lumotlar</h2>
-          {canEdit && <Button size="sm" onClick={onEdit}><Pencil size={14} /> Tahrirlash</Button>}
-        </div>
-        <dl className="m-0 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
-          {rows.map(([k, v]) => (
-            <div key={k} className="flex flex-col"><dt className="text-xs text-sub">{k}</dt><dd className="m-0 text-sm">{v || '—'}</dd></div>
-          ))}
-        </dl>
-      </Card>
-      <Card className="p-5">
-        <h2 className="m-0 mb-3 text-base font-semibold">Statuslar</h2>
-        <div className="flex flex-wrap gap-1.5">
-          {(statuses.data ?? []).map((st) => {
-            const on = p.status_ids.includes(st.id);
+    <section className="flex flex-col gap-3 rounded-md border border-line bg-white p-4">
+      {can('patients.edit') && (
+        <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) add.mutate(undefined); }}>
+          <label htmlFor="tkIn" className="sr-only">Yangi vazifa</label>
+          <input id="tkIn" placeholder="Yangi vazifa, masalan: 3 kundan keyin qo‘ng‘iroq qilish" value={text} onChange={(e) => setText(e.target.value)}
+            className="h-10 min-w-[240px] flex-1 rounded-[3px] border border-line px-3 text-[15px]" />
+          <input type="date" aria-label="Muddat" value={date} onChange={(e) => setDate(e.target.value)} className="h-10 rounded-[3px] border border-line px-3 text-[15px]" />
+          <button type="submit" disabled={!text.trim()} className="h-10 rounded-[3px] bg-primary px-4 text-[15px] text-white">Qo‘shish</button>
+        </form>
+      )}
+      {rows.length === 0 && <div className="py-6 text-center text-sm text-sub">Vazifa yo‘q</div>}
+      {rows.map((t) => (
+        <label key={t.id} className="flex items-center gap-3 border-t border-muted pt-2.5 text-[15px]">
+          <input type="checkbox" checked={t.status === 'done'} disabled={!can('patients.edit')} onChange={() => toggle.mutate(t)} />
+          <span className={cx('flex-1', t.status === 'done' && 'text-faint line-through')}>{t.comment}</span>
+          <span className={cx('text-sm', t.status !== 'done' && t.remind_at < new Date().toISOString() ? 'text-bad' : 'text-sub')}>{dmy(t.remind_at)}</span>
+        </label>
+      ))}
+    </section>
+  );
+}
+
+// ---------------- Vizitlar (qabullar, izohlar, eslatmalar bitta tasmada) ----------------
+interface Note { id: string; patient_id: string; note_date: string; text: string; created_by: string | null }
+type Item = { kind: 'visit'; at: string; v: Visit } | { kind: 'note'; at: string; n: Note } | { kind: 'rem'; at: string; r: Reminder };
+
+function VisitsTab({ p }: { p: Patient }) {
+  const { branch, members, memberName, can, me } = useOrg();
+  const visits = useList<Visit>('visits', { patient_id: p.id }, { order: 'starts_at' });
+  const notes = useList<Note>('patient_notes', { patient_id: p.id });
+  const rems = useList<Reminder>('reminders', { patient_id: p.id, 'status.in': ['planned', 'done', 'sent'] });
+  const rooms = useList<Room>('rooms', { branch_id: branch.id, is_active: true });
+  const [vm, setVm] = useState<{ visit?: Visit } | null>(null);
+  const [md, setMd] = useState<{ kind: 'note' | 'rem'; id?: string; date: string; text: string } | null>(null);
+  const [askDel, setAskDel] = useState<string | null>(null);
+  const items = useMemo<Item[]>(() => [
+    ...(visits.data ?? []).map((v) => ({ kind: 'visit' as const, at: v.starts_at, v })),
+    ...(notes.data ?? []).map((n) => ({ kind: 'note' as const, at: `${n.note_date}T00:00:00`, n })),
+    ...(rems.data ?? []).map((r) => ({ kind: 'rem' as const, at: r.remind_at, r })),
+  ].sort((a, b) => a.at.localeCompare(b.at)), [visits.data, notes.data, rems.data]);
+  const groups = useMemo(() => {
+    const m = new Map<string, Item[]>();
+    for (const it of items) { const d = new Date(it.at); const k = `${MONTHS[d.getMonth()]![0]!.toUpperCase()}${MONTHS[d.getMonth()]!.slice(1)} ${d.getFullYear()}`; m.set(k, [...(m.get(k) ?? []), it]); }
+    return [...m.entries()];
+  }, [items]);
+  const delAction = useAction((it: Item) => it.kind === 'visit' ? db.remove('visits', it.v.id) : it.kind === 'note' ? db.remove('patient_notes', it.n.id) : db.remove('reminders', it.r.id),
+    { invalidate: ['visits', 'patient_notes', 'reminders'], success: 'O‘chirildi', onDone: () => setAskDel(null) });
+  const saveMd = useAction(() => {
+    if (md!.kind === 'note') return md!.id ? db.update('patient_notes', md!.id, { note_date: md!.date, text: md!.text }) : db.insert('patient_notes', { patient_id: p.id, note_date: md!.date, text: md!.text });
+    const row = { patient_id: p.id, remind_at: new Date(md!.date + 'T09:00:00').toISOString(), comment: md!.text, assigned_to: me.user_id, audience: 'me' };
+    return md!.id ? db.update('reminders', md!.id, row) : db.insert('reminders', row);
+  }, { invalidate: ['patient_notes', 'reminders'], success: 'Saqlandi', onDone: () => setMd(null) });
+  const editV = can('schedule.edit', branch.id), editP = can('patients.edit');
+  const ICON = 'grid h-[30px] w-[30px] flex-none place-items-center rounded-full text-white';
+
+  return (
+    <div className="grid grid-cols-1 gap-x-2 gap-y-2 lg:grid-cols-[minmax(0,820px)_40px]">
+      {visits.isLoading ? <PageLoader /> : items.length === 0 && <div className="py-6 text-center text-sm text-sub lg:col-span-2">Hali vizit yo‘q</div>}
+      {groups.map(([label, list]) => (
+        <div key={label} className="contents">
+          <h3 className="m-0 mt-2.5 mb-0.5 ml-2.5 text-lg font-medium lg:col-span-2">{label}</h3>
+          {list.map((it) => {
+            const d = new Date(it.at);
+            const key = it.kind === 'visit' ? it.v.id : it.kind === 'note' ? it.n.id : it.r.id;
+            const m = it.kind === 'visit' ? members.find((x) => x.user_id === it.v.doctor_id) : undefined;
+            const st = it.kind === 'visit' ? VISIT_STATUS[it.v.status] : null;
+            const canDel = it.kind === 'visit' ? editV : editP;
             return (
-              <button key={st.id} type="button" disabled={!canEdit} onClick={() => toggle.mutate(st.id)} aria-pressed={on}
-                className={cx('inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs', on ? 'border-transparent bg-nav font-medium' : 'border-line bg-white text-sub hover:bg-muted')}>
-                <span className="h-2 w-2 rounded-full" style={{ background: st.color }} />{st.name}
-              </button>
+              <div key={key} className="contents">
+                <div className="flex min-h-10 items-center gap-3.5 rounded-[3px] border border-[#e6ecf0] bg-white px-2.5 text-[15px]">
+                  <span className={cx(ICON, it.kind === 'visit' ? 'bg-primary' : it.kind === 'note' ? 'bg-[#15803d]' : 'bg-[#b45309]')}>
+                    {it.kind === 'visit' ? <CalendarDays size={16} /> : it.kind === 'note' ? <FilePen size={16} /> : <Bell size={16} />}
+                  </span>
+                  <span className="whitespace-nowrap">{dmy(d)}</span>
+                  <span className="whitespace-nowrap">{it.kind === 'visit' ? `${hm(it.v.starts_at)} - ${hm(it.v.ends_at)}` : ''}</span>
+                  <span className="w-[26px] text-[#3d4858]">{WD_SHORT[d.getDay()]}</span>
+                  <span className={cx('min-w-0 flex-1 truncate', it.kind !== 'visit' && 'italic text-[#3d4858]')}>{it.kind === 'visit' ? it.v.comment : it.kind === 'note' ? it.n.text : it.r.comment}</span>
+                  {it.kind === 'visit' && it.v.mood && <span className="text-xl leading-none" role="img">{it.v.mood}</span>}
+                  {it.kind === 'visit' && it.v.doctor_id && (
+                    <span className="inline-flex max-w-[150px] items-center gap-2 truncate">
+                      <span className="grid h-[30px] w-[30px] flex-none place-items-center rounded-[3px] text-[11px] font-semibold text-white" style={{ background: m?.color ?? '#94a3b8' }}>{initials(memberName(it.v.doctor_id))}</span>
+                      <span className="truncate">{memberName(it.v.doctor_id)}</span>
+                    </span>
+                  )}
+                  {st && <span className="flex h-6 w-[166px] flex-none items-center justify-center rounded-[3px] text-sm text-white" style={{ background: st.color }}>{st.label}</span>}
+                  {it.kind === 'rem' && <span className="flex h-6 w-[166px] flex-none items-center justify-center rounded-[3px] bg-[#b45309] text-sm text-white">{it.r.status === 'done' ? 'Bajarildi' : 'Eslatma'}</span>}
+                  {it.kind === 'note' && <span className="flex h-6 w-[166px] flex-none items-center justify-center rounded-[3px] bg-[#15803d] text-sm text-white">Izoh</span>}
+                  {canDel && (askDel === key ? (
+                    <span className="flex items-center gap-1.5 text-[13px]">O‘chirilsinmi? <button type="button" onClick={() => delAction.mutate(it)} className="font-medium text-bad">Ha</button><button type="button" onClick={() => setAskDel(null)} className="text-sub">Yo‘q</button></span>
+                  ) : <button type="button" onClick={() => setAskDel(key)} aria-label="O‘chirish" title="O‘chirish" className={cx(ICON, 'bg-[#ef4444]')}><Trash2 size={15} /></button>)}
+                </div>
+                <div className="flex items-center">
+                  {(it.kind === 'visit' ? editV : editP) && (
+                    <button type="button" aria-label="Tahrirlash" title="Tahrirlash" className="grid h-8 w-8 place-items-center rounded-full bg-[#e6ecf0] text-sub"
+                      onClick={() => it.kind === 'visit' ? setVm({ visit: it.v }) : it.kind === 'note' ? setMd({ kind: 'note', id: it.n.id, date: it.n.note_date, text: it.n.text }) : setMd({ kind: 'rem', id: it.r.id, date: isoDate(new Date(it.r.remind_at)), text: it.r.comment ?? '' })}>
+                      <Pencil size={15} />
+                    </button>
+                  )}
+                </div>
+              </div>
             );
           })}
         </div>
-      </Card>
-    </div>
-  );
-}
-
-function VisitsTab({ p }: { p: Patient }) {
-  const { branches, memberName } = useOrg();
-  const visits = useList<Visit>('visits', { patient_id: p.id }, { order: 'starts_at desc' });
-  const bmap = byId(branches);
-  if (visits.isLoading) return <PageLoader />;
-  const list = visits.data ?? [];
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <span className="text-sm text-sub">Jami: {list.length} ta tashrif</span>
-        <Link to="/" className="inline-flex items-center gap-1.5 text-sm no-underline"><CalendarPlus size={15} /> Jadvalga yozish</Link>
+      ))}
+      <div className="grid gap-2 sm:grid-cols-2 lg:col-span-1">
+        {editV && <button type="button" onClick={() => setVm({})} className="mt-2 inline-flex h-[42px] items-center justify-center gap-2 rounded-[3px] bg-primary text-base text-white"><CalendarPlus size={18} />Qabulga yozish</button>}
+        {editP && <button type="button" onClick={() => setMd({ kind: 'note', date: isoDate(new Date()), text: '' })} className="mt-2 inline-flex h-[42px] items-center justify-center gap-2 rounded-[3px] bg-[#15803d] text-base text-white"><FilePen size={18} />Izoh qo‘shish</button>}
+        {editP && <button type="button" onClick={() => setMd({ kind: 'rem', date: isoDate(new Date(Date.now() + 7 * 86400000)), text: '' })} className="inline-flex h-[42px] items-center justify-center gap-2 rounded-[3px] bg-[#b45309] text-base text-white"><Bell size={18} />Eslatma qo‘shish</button>}
       </div>
-      {list.length === 0 ? <Empty>Tashriflar yo‘q</Empty> : list.map((v) => {
-        const d = new Date(v.starts_at);
-        return (
-          <div key={v.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-2.5 text-sm last:border-b-0">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: VISIT_STATUS[v.status].color }} title={VISIT_STATUS[v.status].label} />
-            <span className="w-24 font-medium">{dmy(d)}</span>
-            <span className="w-24 text-sub">{hm(v.starts_at)} – {hm(v.ends_at)}</span>
-            <span className="w-24 text-sub">{WEEKDAYS[d.getDay()]}</span>
-            <span className="min-w-[140px]">{memberName(v.doctor_id)}</span>
-            <span className="text-sub">{bmap.get(v.branch_id)?.name ?? 'Boshqa filial'}</span>
-            <span className="flex-1 truncate text-sub">{v.comment}</span>
-            <Badge tone={v.status === 'completed' ? 'green' : v.status === 'no_show' ? 'red' : v.status === 'cancelled' ? 'gray' : 'blue'}>{VISIT_STATUS[v.status].label}</Badge>
+      <div className="lg:col-span-2"><button type="button" onClick={() => window.print()} aria-label="Chop etish" title="Chop etish" className="grid h-9 w-9 place-items-center rounded-md text-sub hover:bg-muted print:hidden"><Printer size={20} /></button></div>
+      {vm && (
+        <VisitModal branch={branch} rooms={rooms.data ?? []} visit={vm.visit} patient={p}
+          init={vm.visit ? undefined : { date: new Date(), min: Math.ceil((new Date().getHours() * 60 + new Date().getMinutes()) / 15) * 15, room: null, patient: p }} onClose={() => setVm(null)} />
+      )}
+      {md && (
+        <Modal open onClose={() => setMd(null)} title={md.kind === 'note' ? (md.id ? 'Izoh' : 'Izoh qo‘shish') : (md.id ? 'Eslatma' : 'Eslatma qo‘shish')} width={520}
+          footer={<><Button onClick={() => setMd(null)}>Bekor qilish</Button><span className="flex-1" /><Button variant="primary" disabled={!md.text.trim() || !md.date} loading={saveMd.isPending} onClick={() => saveMd.mutate(undefined)}>Saqlash</Button></>}>
+          <div className="flex flex-col gap-4">
+            <label className="flex items-center gap-6 text-[15px]"><span className="w-24 text-right">Sana<span className="text-bad"> *</span></span>
+              <input type="date" value={md.date} onChange={(e) => setMd({ ...md, date: e.target.value })} className="h-[42px] rounded border border-line px-3" /></label>
+            <label className="flex items-start gap-6 text-[15px]"><span className="w-24 pt-2 text-right">{md.kind === 'note' ? 'Izoh' : 'Eslatma matni'}</span>
+              <textarea rows={3} value={md.text} onChange={(e) => setMd({ ...md, text: e.target.value })} className="flex-1 rounded border border-line px-3 py-2" autoFocus /></label>
           </div>
-        );
-      })}
-    </Card>
-  );
-}
-
-// ---------------- Davolash rejasi ----------------
-interface Plan { id: string; patient_id: string; doctor_id: string | null; title: string; status: 'draft' | 'proposed' | 'accepted' | 'rejected'; discount_percent: number; created_at: string }
-interface PlanItem { id: string; plan_id: string; price_item_id: string | null; name: string; tooth: string | null; qty: number; price: number }
-const PLAN_ST: Record<Plan['status'], [string, 'gray' | 'blue' | 'green' | 'red']> = {
-  draft: ['Qoralama', 'gray'], proposed: ['Taklif qilingan', 'blue'], accepted: ['Qabul qilingan', 'green'], rejected: ['Rad etilgan', 'red'],
-};
-
-function PlansTab({ p }: { p: Patient }) {
-  const { can, me } = useOrg();
-  const plans = useList<Plan>('treatment_plans', { patient_id: p.id });
-  const ids = (plans.data ?? []).map((x) => x.id);
-  const items = useList<PlanItem>('treatment_plan_items', { 'plan_id.in': ids }, { enabled: ids.length > 0 });
-  const [adding, setAdding] = useState<string | null>(null);
-  const create = useAction(() => db.insert('treatment_plans', { patient_id: p.id, doctor_id: me.user_id, title: `Reja ${(plans.data?.length ?? 0) + 1}` }), { invalidate: ['treatment_plans'] });
-  const upd = useAction(({ id, patch }: { id: string; patch: Record<string, unknown> }) => db.update('treatment_plans', id, patch), { invalidate: ['treatment_plans'] });
-  const delPlan = useAction((id: string) => db.remove('treatment_plans', id), { invalidate: ['treatment_plans'], success: 'O‘chirildi' });
-  const delItem = useAction((id: string) => db.remove('treatment_plan_items', id), { invalidate: ['treatment_plan_items'] });
-  const addItems = useAction(({ plan, list }: { plan: string; list: { item: PriceItem; tooth: string }[] }) =>
-    db.insertMany('treatment_plan_items', list.map((x) => ({ plan_id: plan, price_item_id: x.item.id, name: x.item.name, tooth: x.tooth || null, price: x.item.price, qty: 1 }))),
-  { invalidate: ['treatment_plan_items'], onDone: () => setAdding(null) });
-  const edit = can('patients.edit');
-
-  return (
-    <div className="flex flex-col gap-3">
-      {edit && <div><Button variant="primary" size="sm" onClick={() => create.mutate(undefined)}><Plus size={15} /> Yangi reja</Button></div>}
-      {plans.data?.length === 0 && <Card><Empty>Davolash rejalari yo‘q</Empty></Card>}
-      {(plans.data ?? []).map((pl) => {
-        const its = (items.data ?? []).filter((i) => i.plan_id === pl.id);
-        const total = its.reduce((a, i) => a + i.qty * i.price, 0);
-        const final = Math.round(total * (1 - pl.discount_percent / 100));
-        return (
-          <Card key={pl.id} className="p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <input defaultValue={pl.title} disabled={!edit} aria-label="Reja nomi"
-                onBlur={(e) => e.target.value !== pl.title && upd.mutate({ id: pl.id, patch: { title: e.target.value } })}
-                className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 text-base font-semibold hover:border-line focus:border-primary focus:outline-none" />
-              <select value={pl.status} disabled={!edit} aria-label="Holati" onChange={(e) => upd.mutate({ id: pl.id, patch: { status: e.target.value } })}
-                className="h-7 rounded-lg border border-line bg-white px-2 text-[13px]">
-                {Object.entries(PLAN_ST).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
-              </select>
-              {edit && <button type="button" aria-label="Rejani o‘chirish" onClick={() => delPlan.mutate(pl.id)} className="grid h-7 w-7 place-items-center rounded-lg text-sub hover:bg-muted"><Trash2 size={15} /></button>}
-            </div>
-            <div className="mt-1 text-xs text-sub">{dmy(pl.created_at)} · {its.length} ta ish</div>
-            <div className="mt-3 flex flex-col">
-              {its.map((i) => (
-                <div key={i.id} className="flex items-center justify-between gap-2 border-t border-line py-2 text-sm">
-                  <span>{i.tooth && <b className="mr-1 font-medium">№{i.tooth} —</b>}{i.name}{i.qty > 1 && ` × ${i.qty}`}</span>
-                  <span className="flex items-center gap-2">{money(i.qty * i.price)}
-                    {edit && <button type="button" aria-label="O‘chirish" onClick={() => delItem.mutate(i.id)} className="text-faint hover:text-bad"><X size={14} /></button>}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-              {edit ? <Button size="sm" onClick={() => setAdding(pl.id)}><Plus size={14} /> Xizmat qo‘shish</Button> : <span />}
-              <div className="flex items-center gap-3 text-sm">
-                <label className="flex items-center gap-1 text-sub">Chegirma
-                  <input type="number" min={0} max={100} defaultValue={pl.discount_percent} disabled={!edit}
-                    onBlur={(e) => upd.mutate({ id: pl.id, patch: { discount_percent: Number(e.target.value) || 0 } })}
-                    className="h-7 w-14 rounded-md border border-line px-1.5 text-right" />%</label>
-                <span className="text-base font-semibold">{som(final)}</span>
-              </div>
-            </div>
-          </Card>
-        );
-      })}
-      {adding && <ServicePicker withTooth onClose={() => setAdding(null)} onPick={(list) => addItems.mutate({ plan: adding, list })} />}
+        </Modal>
+      )}
     </div>
   );
 }
@@ -257,40 +271,65 @@ export function ServicePicker({ onPick, onClose, withTooth }: { onPick: (l: { it
   );
 }
 
-// ---------------- Kasallik tarixi ----------------
+// ---------------- Davolash tarixi ----------------
 function HistoryTab({ p }: { p: Patient }) {
-  const { can, me, branch, memberName } = useOrg();
+  const { can, me, branch, members, memberName } = useOrg();
   const recs = useList<TreatmentRecord>('treatment_records', { patient_id: p.id });
   const [f, setF] = useState({ tooth: '', diagnosis: '', description: '' });
+  const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const add = useAction(() => db.insert('treatment_records', { ...f, patient_id: p.id, doctor_id: me.user_id, branch_id: branch.id }),
-    { invalidate: ['treatment_records'], success: 'Yozuv qo‘shildi', onDone: () => setF({ tooth: '', diagnosis: '', description: '' }) });
+    { invalidate: ['treatment_records'], success: 'Yozuv qo‘shildi', onDone: () => { setF({ tooth: '', diagnosis: '', description: '' }); setOpen(false); } });
   const del = useAction((id: string) => db.remove('treatment_records', id), { invalidate: ['treatment_records'] });
   const list = (recs.data ?? []).filter((r) => !q || `${r.diagnosis} ${r.description} ${r.tooth}`.toLowerCase().includes(q.toLowerCase()));
+  const byDay = useMemo(() => {
+    const m = new Map<string, TreatmentRecord[]>();
+    for (const r of list) { const k = isoDate(new Date(r.created_at)); m.set(k, [...(m.get(k) ?? []), r]); }
+    return [...m.entries()];
+  }, [list]);
+  const color = (u: string | null) => members.find((m) => m.user_id === u)?.color ?? '#0ea5e9';
   return (
-    <div className="flex flex-col gap-3">
-      {can('patients.edit') && (
-        <Card className="flex flex-col gap-2 p-4">
+    <div className="flex max-w-[1000px] flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative w-80 max-w-full">
+          <Search size={16} className="pointer-events-none absolute top-3 left-3 text-faint" />
+          <label htmlFor="hs" className="sr-only">Qidirish</label>
+          <input id="hs" type="search" placeholder="Qidirish" value={q} onChange={(e) => setQ(e.target.value)} className="h-10 w-full rounded-[10px] border border-line bg-white pr-3 pl-9 text-sm" />
+        </div>
+        {can('patients.edit') && <button type="button" onClick={() => setOpen(!open)} className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-primary px-4 text-sm font-medium text-white"><Plus size={16} />Yangi yozuv</button>}
+      </div>
+      {open && (
+        <section className="flex flex-col gap-2 rounded-2xl border border-line bg-white p-4">
           <div className="grid grid-cols-[100px_1fr] gap-2">
             <Input placeholder="Tish №" value={f.tooth} onChange={(e) => setF({ ...f, tooth: e.target.value })} aria-label="Tish raqami" />
-            <Input placeholder="Tashxis (masalan: Pulpit)" value={f.diagnosis} onChange={(e) => setF({ ...f, diagnosis: e.target.value })} aria-label="Tashxis" />
+            <Input placeholder="Tashxis (masalan: Pulpit)" value={f.diagnosis} onChange={(e) => setF({ ...f, diagnosis: e.target.value })} aria-label="Tashxis" autoFocus />
           </div>
           <Textarea rows={2} placeholder="Nima qilindi, izoh…" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} aria-label="Izoh" />
-          <div className="flex justify-end"><Button variant="primary" size="sm" disabled={!f.diagnosis && !f.description} loading={add.isPending} onClick={() => add.mutate(undefined)}>Yozuv qo‘shish</Button></div>
-        </Card>
+          <div className="flex justify-end gap-2"><Button onClick={() => setOpen(false)}>Bekor qilish</Button><Button variant="primary" disabled={!f.diagnosis && !f.description} loading={add.isPending} onClick={() => add.mutate(undefined)}>Saqlash</Button></div>
+        </section>
       )}
-      <Input type="search" placeholder="Tarixdan qidirish" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" aria-label="Qidirish" />
-      {list.length === 0 && <Card><Empty>Yozuvlar yo‘q</Empty></Card>}
-      {list.map((r) => (
-        <Card key={r.id} className="flex gap-3 p-4">
-          <span className="grid h-8 w-8 flex-none place-items-center rounded-full bg-nav text-xs font-semibold">{initials(memberName(r.doctor_id))}</span>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="font-semibold">{r.diagnosis || 'Yozuv'}</span>
-            <span className="text-xs text-sub">{memberName(r.doctor_id)} · {dmyhm(r.created_at)}</span>
-            <span className="text-sm whitespace-pre-wrap">{r.tooth && <b className="mr-1 font-medium">№{r.tooth}</b>}{r.description}</span>
+      {list.length === 0 && <Empty>Yozuvlar yo‘q</Empty>}
+      {byDay.map(([day, rs]) => (
+        <div key={day} className="flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <span className="h-px flex-1 bg-line" />
+            <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-sub">📅 {new Date(day).getDate()}-{MONTHS[new Date(day).getMonth()]} {new Date(day).getFullYear()}</span>
+            <span className="h-px flex-1 bg-line" />
           </div>
-          {can('patients.edit') && <button type="button" aria-label="O‘chirish" onClick={() => del.mutate(r.id)} className="self-start text-faint hover:text-bad"><Trash2 size={15} /></button>}
-        </Card>
+          {rs.map((r) => (
+            <section key={r.id} className="rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04)]">
+              <div className="flex gap-3 p-4">
+                <span className="grid h-9 w-9 flex-none place-items-center rounded-full text-xs font-semibold text-white" style={{ background: color(r.doctor_id) }}>{initials(memberName(r.doctor_id))}</span>
+                <div className="flex flex-1 flex-col gap-0.5">
+                  <span className="text-base font-semibold">{r.diagnosis || 'Yozuv'}</span>
+                  <span className="text-xs text-sub"><span style={{ color: color(r.doctor_id) }}>{memberName(r.doctor_id)}</span>  {dmyhm(r.created_at)}</span>
+                  <span className="mt-1 text-sm whitespace-pre-wrap">{r.tooth && <span className="mr-1.5 rounded bg-muted px-1.5 py-px text-xs font-medium">№{r.tooth}</span>}{r.description}</span>
+                </div>
+                {can('patients.edit') && <button type="button" aria-label="O‘chirish" onClick={() => del.mutate(r.id)} className="grid h-7 w-7 place-items-center self-start text-faint hover:text-bad"><Trash2 size={16} /></button>}
+              </div>
+            </section>
+          ))}
+        </div>
       ))}
     </div>
   );
@@ -388,7 +427,7 @@ function FinanceTab({ p, s }: { p: Patient; s: Summary }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Card className="p-4"><div className="text-xs text-sub">Qilingan ish</div><div className="mt-1 text-xl font-semibold">{som(s.billed)}</div></Card>
+        <Card className="p-4"><div className="text-xs text-sub">Jami xizmat</div><div className="mt-1 text-xl font-semibold">{som(s.billed)}</div></Card>
         <Card className="p-4"><div className="text-xs text-sub">To‘langan</div><div className="mt-1 text-xl font-semibold text-ok">{som(s.paid)}</div></Card>
         <Card className="p-4"><div className="text-xs text-sub">{debt >= 0 ? 'Qarz' : 'Avans'}</div><div className={cx('mt-1 text-xl font-semibold', debt > 0 && 'text-bad')}>{som(Math.abs(debt))}</div></Card>
       </div>

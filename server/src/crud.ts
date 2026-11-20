@@ -54,7 +54,12 @@ const R: Record<string, Resource> = {
     columns: ['category_id', 'name', 'code', 'price', 'position', 'archived'], filters: ['category_id', 'archived'],
     search: ['name', 'code'], order: 'position, name' },
   treatment_plans: { table: 'treatment_plans', scope: 'org', read: 'patients.view', write: 'patients.edit',
-    columns: ['patient_id', 'doctor_id', 'title', 'status', 'discount_percent'], filters: ['patient_id', 'status'], order: 'created_at desc' },
+    columns: ['patient_id', 'doctor_id', 'title', 'status', 'discount_percent', 'kind', 'approved', 'note', 'plan_date', 'show_price', 'stages'],
+    filters: ['patient_id', 'status', 'kind', 'approved'], order: 'created_at desc' },
+  plan_templates: { table: 'plan_templates', scope: 'org', read: 'patients.view', write: 'patients.edit',
+    columns: ['name', 'stages'], order: 'name' },
+  patient_notes: { table: 'patient_notes', scope: 'org', read: 'patients.view', write: 'patients.edit',
+    columns: ['patient_id', 'note_date', 'text'], filters: ['patient_id'], order: 'note_date desc, created_at desc' },
   treatment_plan_items: { table: 'treatment_plan_items', scope: 'child', parent: { resource: 'treatment_plans', fk: 'plan_id' },
     read: 'patients.view', write: 'patients.edit', columns: ['plan_id', 'price_item_id', 'name', 'tooth', 'qty', 'price'], filters: ['plan_id'], order: 'id' },
   treatment_records: { table: 'treatment_records', scope: 'org', read: 'patients.view', write: 'patients.edit',
@@ -218,11 +223,18 @@ function buildWhere(m: MemberCtx, res: Resource, query: Record<string, string>, 
 }
 
 // Bo'sh bo'lishi mumkin bo'lgan, lekin NULL bo'lmaydigan matn ustunlari.
-const KEEP_EMPTY = new Set(['name', 'first_name', 'last_name', 'middle_name', 'title', 'reason']);
+const KEEP_EMPTY = new Set(['name', 'first_name', 'last_name', 'middle_name', 'title', 'reason', 'patient_name', 'text']);
+
+// jsonb ustunlar: pg massivni Postgres massivi deb yuboradi, shuning uchun JSON matnga aylantiramiz.
+const JSON_COLS = new Set(['stages']);
 
 function pick(res: Resource, body: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
-  for (const c of res.columns) if (c in body) out[c] = body[c] === '' && !KEEP_EMPTY.has(c) ? null : body[c];
+  for (const c of res.columns) {
+    if (!(c in body)) continue;
+    const v = body[c];
+    out[c] = JSON_COLS.has(c) ? JSON.stringify(v ?? []) : v === '' && !KEEP_EMPTY.has(c) ? null : v;
+  }
   return out;
 }
 

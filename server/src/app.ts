@@ -11,6 +11,7 @@ import { warehouseRoutes } from './routes/warehouse.js';
 import { clinicRoutes } from './routes/clinic.js';
 import { staffRoutes } from './routes/staff.js';
 import { fileRoutes } from './routes/files.js';
+import { planRoutes } from './routes/plans.js';
 import { HttpError, pgMessage } from './errors.js';
 import { pool } from './db.js';
 
@@ -65,6 +66,7 @@ export async function buildApp() {
   await clinicRoutes(app);
   await staffRoutes(app);
   await fileRoutes(app);
+  await planRoutes(app);
 
   return app;
 }
