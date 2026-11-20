@@ -12,6 +12,7 @@ import { clinicRoutes } from './routes/clinic.js';
 import { staffRoutes } from './routes/staff.js';
 import { fileRoutes } from './routes/files.js';
 import { planRoutes } from './routes/plans.js';
+import { reportRoutes } from './routes/reports.js';
 import { HttpError, pgMessage } from './errors.js';
 import { pool } from './db.js';
 
@@ -67,6 +68,7 @@ export async function buildApp() {
   await staffRoutes(app);
   await fileRoutes(app);
   await planRoutes(app);
+  await reportRoutes(app);
 
   return app;
 }

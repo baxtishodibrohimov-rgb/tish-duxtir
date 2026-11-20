@@ -4,15 +4,16 @@ Bu fayl yangi suhbat (chat) uchun: loyiha qayerda turibdi va keyin nima qilish k
 
 ## Loyiha
 
-- Repozitoriy: `baxtishodibrohimov-rgb/tish-duxtir`, branch: `claude/eloquent-euler-qavaku` (`main` hali bo'sh).
+- Repozitoriy: `baxtishodibrohimov-rgb/tish-duxtir`, branch: `claude/compassionate-fermi-ofdblr` (artifaktga moslangan oxirgi holat; `claude/eloquent-euler-qavaku` — undan oldingi).
 - Eski dastur Lovable'da yozilgan edi (Supabase bilan). Yangi dastur undan butunlay ajratilgan va noldan yozilgan.
-- Dizayn manbai: claude.ai artifakti (Tish Duxtir prototipi) — Jadval, Bemorlar, Kassa, Ombor, Hisobotlar, Sozlamalar.
+- Dizayn manbai: claude.ai artifakti «Tish Duxtir» — 11 ta ekran: yuqori menyu, Jadval, Bemorlar, Bemor kartasi, Yangi bemor,
+  Sozlamalar, Kassa, Ombor, Davolash rejalari, Hisobotlar, AI yordamchi. Interfeys shu artifaktga moslangan.
 
 ## Texnologiya
 
 - `web/` — React 18 + TypeScript + Tailwind v4 (Vite). Router o'zimizniki (`web/src/lib/router.tsx`).
 - `server/` — Node.js 22 + Fastify 5 + PostgreSQL 16 (`pg`). Sessiya: httpOnly cookie + JWT, parollar bcrypt.
-- `server/migrations/` — 3 ta migratsiya, server ishga tushganda avtomatik qo'llanadi.
+- `server/migrations/` — 4 ta migratsiya, server ishga tushganda avtomatik qo'llanadi.
 - `deploy/` — Docker Compose: `db` (Postgres), `api`, `web` (Caddy: HTTPS + statik + /api proksi), `backup` (har kuni 03:00).
 
 ## Asosiy tushunchalar
@@ -26,6 +27,12 @@ Bu fayl yangi suhbat (chat) uchun: loyiha qayerda turibdi va keyin nima qilish k
   (`stock_lots`). O'tkazilgan hujjat o'chirilmaydi — `reverse_stock_doc()` (storno). Akt yopilganda
   `close_act()` kalkulyatsiya kartalari bo'yicha materialni avtomatik chiqaradi.
 - Pul: `money_moves` (income/expense/transfer/refund). Bemor balansi: `patient_balances` view.
+- Davolash rejasi: `treatment_plans.stages` (jsonb) — bosqichlar va qatorlar. «Bajarish» (`POST /api/plans/:id/done`)
+  akt yaratadi va yopadi, qatorlar «Bajarildi» bo'ladi.
+- 004-migratsiya: kutish navbati (`waiting_list`), eslatmalar (`reminders.audience`, `done`), qabul belgisi va
+  manipulyatsiyalar (`visits.mood`, `visit_items`), bemorning qo'shimcha maydonlari, `patient_notes`, `plan_templates`,
+  kontragent hisoblari (`counterparty_invoices`).
+- Hisobotlar: `server/src/routes/reports.ts` — 27 ta jadval hisoboti (`GET /api/reports/table/:slug`).
 
 ## Holat
 
@@ -38,7 +45,7 @@ eski bazadan import (`server/src/import.ts`). Docker image hali hech qayerda yig
 To'liq qadamlar `README.md` da. Qisqacha:
 1. Domen DNS A yozuvi → server IP.
 2. `curl -fsSL https://get.docker.com | sh`, `ufw` bilan 22/80/443 portlarni ochish.
-3. `git clone -b claude/eloquent-euler-qavaku ... /opt/tish-duxtir`
+3. `git clone -b claude/compassionate-fermi-ofdblr ... /opt/tish-duxtir`
 4. `cd /opt/tish-duxtir/deploy && cp .env.example .env` → `DOMAIN`, `DB_PASSWORD`, `JWT_SECRET` (`openssl rand -hex 32`).
 5. `docker compose up -d --build`
 6. `docker compose run --rm api node dist/cli.js setup --org "..." --branches "A,B,C" --name "..." --login ...`

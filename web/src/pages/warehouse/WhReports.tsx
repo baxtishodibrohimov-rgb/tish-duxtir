@@ -41,12 +41,12 @@ export function WhReports({ wh }: { wh: WhCtx }) {
       <div className="flex min-w-0 flex-col gap-3">
         {(r === 'turnover' || r === 'writeoffs') && (
           <div className="flex flex-wrap items-center gap-2">
-            {r === 'turnover' && <Select aria-label="Ombor" value={whId} onChange={(e) => setWhId(e.target.value)} className="h-8 w-60">
+            {r === 'turnover' && <Select aria-label="Ombor" value={whId} onChange={(e) => setWhId(e.target.value)} className="!h-8 !w-60">
               {wh.warehouses.map((w) => <option key={w.id} value={w.id}>{wh.whLabel(w)}</option>)}
             </Select>}
-            <Input type="date" aria-label="Dan" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-40" />
+            <Input type="date" aria-label="Dan" value={from} onChange={(e) => setFrom(e.target.value)} className="!h-8 !w-40" />
             <span className="text-sub">—</span>
-            <Input type="date" aria-label="Gacha" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-40" />
+            <Input type="date" aria-label="Gacha" value={to} onChange={(e) => setTo(e.target.value)} className="!h-8 !w-40" />
           </div>
         )}
         {r === 'turnover' && <Turnover whId={whId} from={from} to={to} />}

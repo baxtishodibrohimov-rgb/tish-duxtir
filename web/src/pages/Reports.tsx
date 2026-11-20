@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useOrg } from '@/lib/auth';
 import { http } from '@/lib/api';
-import { addDays, dmy, isoDate, money, som } from '@/lib/format';
-import { useTitle } from '@/lib/router';
+import { addDays, dmy, dmyhm, isoDate, money, som } from '@/lib/format';
+import { Link, useTitle } from '@/lib/router';
+import { ArrowLeft, ChartColumn, CalendarCheck, ChartLine, Users, WalletCards, Download, Printer } from 'lucide-react';
+import { downloadCsv } from './warehouse/Docs';
 import { Card, Empty, Input, PageLoader, Select, cx } from '@/components/ui';
 
 interface Overview {
@@ -15,8 +17,8 @@ interface Overview {
   byBranch: { id: string; name: string; income: number; expense: number }[];
 }
 
-export function Reports() {
-  useTitle('Hisobotlar');
+export function Overview() {
+  useTitle('Umumiy hisobot');
   const { branches, branch } = useOrg();
   const t = new Date();
   const [from, setFrom] = useState(isoDate(new Date(t.getFullYear(), t.getMonth(), 1)));
@@ -41,13 +43,13 @@ export function Reports() {
   return (
     <div className="mx-auto flex max-w-[1300px] flex-col gap-4 p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="m-0 text-[22px] font-semibold">Hisobotlar</h1>
-          <span className="text-sm text-sub">Klinika bo‘yicha statistika, moliya va xodimlar</span>
+        <div className="flex flex-col gap-1">
+          <Link to="/reports" className="inline-flex items-center gap-1.5 text-sm !text-sub no-underline"><ArrowLeft size={15} /> Hisobotlar</Link>
+          <h1 className="m-0 text-[22px] font-semibold">Umumiy hisobot</h1>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {branches.length > 1 && (
-            <Select aria-label="Filial" value={br} onChange={(e) => setBr(e.target.value)} className="h-8 w-44">
+            <Select aria-label="Filial" value={br} onChange={(e) => setBr(e.target.value)} className="!h-8 !w-44">
               <option value="">Barcha filiallar</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </Select>
           )}
@@ -55,8 +57,8 @@ export function Reports() {
             <button key={l} type="button" onClick={() => { setFrom(f); setTo(tt); }}
               className={cx('h-8 rounded-lg px-2.5 text-[13px] font-medium', from === f && to === tt ? 'bg-nav' : 'text-sub hover:bg-muted')}>{l}</button>
           ))}
-          <Input type="date" aria-label="Dan" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-36" />
-          <Input type="date" aria-label="Gacha" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-36" />
+          <Input type="date" aria-label="Dan" value={from} onChange={(e) => setFrom(e.target.value)} className="!h-8 !w-36" />
+          <Input type="date" aria-label="Gacha" value={to} onChange={(e) => setTo(e.target.value)} className="!h-8 !w-36" />
         </div>
       </div>
 
@@ -138,5 +140,94 @@ export function Reports() {
         <p className="m-0 text-xs text-sub">Ombor hisobotlari (aylanma, qoldiq qiymati, hisobdan chiqarishlar, yetkazib beruvchilar qarzi) — Ombor → Hisobotlar bo‘limida.</p>
       </>}
     </div>
+  );
+}
+
+// ---------------- Hisobotlar menyusi (maketdagi ro'yxat) ----------------
+const GROUPS: { title: string; icon: typeof Users; items: [string, string | null][] }[] = [
+  { title: 'Klinika hisobotlari', icon: ChartColumn, items: [['Umumiy hisobot', 'umumiy'], ['Shifokorlar yuklamasi', 'shifokorlar-yuklamasi'], ['Kabinetlar bandligi', 'kabinetlar-bandligi'],
+    ['Bajarilgan ishlar va ularning soni', 'bajarilgan-ishlar-soni'], ['Yangi bemorlar klinika haqida qayerdan bilgan', 'manba'], ['Tahrirlash jurnali', 'tahrirlash-jurnali'],
+    ['Xarajat kategoriyalari', 'xarajat-kategoriyalari'], ['Xarajatlar', 'xarajatlar'], ['Bemorni qabul qilishdagi kechikishlar', null], ['Birlamchi bemorlar', 'birlamchi-bemorlar'],
+    ['Moliyaviy hisobotlar', 'moliyaviy'], ['Davolash rejalari', 'davolash-rejalari'], ['Klinikadan tashqari ulashilgan bemorlar', null], ['Foyda va zarar', 'foyda-zarar']] },
+  { title: 'Jadval, eslatmalar, kutish navbati', icon: CalendarCheck, items: [['Bemor vizitlari', 'bemor-vizitlari'], ['Shifokor smenalari', 'shifokor-smenalari'], ['Shifokor smenalarini nusxa ko‘chirish', null],
+    ['Administrativ xodimlar smenalari', 'shifokor-smenalari'], ['Assistentlar smenalari', 'shifokor-smenalari'], ['Eslatmalar', 'eslatmalar'], ['Kutish navbati', 'kutish-navbati']] },
+  { title: 'Mening hisobotlarim', icon: ChartLine, items: [['Mening bemorlar bo‘yicha bajarilgan ishlarim', 'mening-bemorlarim'], ['Mening bajarilgan ishlarim', 'mening-ishlarim']] },
+  { title: 'Bemorlar', icon: Users, items: [['Bemorlar', 'bemorlar'], ['Depozitli bemorlar', null], ['Qarzdor bemorlar', 'qarzdor-bemorlar'], ['Avansli bemorlar', 'avansli-bemorlar'],
+    ['Tashlab ketgan bemorlar', 'tashlab-ketgan'], ['Aktlar', 'aktlar'], ['Bajarilgan ishlar', 'bajarilgan-ishlar'], ['Bemor to‘lovlari', 'bemor-tolovlari'], ['Bemor depozitlari', null],
+    ['Tug‘ilgan kunlar', 'tugilgan-kunlar'], ['O‘chirilgan bemorlar', 'ochirilgan-bemorlar'], ['Demografiya', 'demografiya']] },
+  { title: 'Ish haqi (ZP)', icon: WalletCards, items: [['Ish haqi hisoblanmalari', null], ['Ish haqi berish jurnali', null], ['Ish haqi sozlamalari', null], ['Bajarilgan ishlar bo‘yicha ish haqi hisoblash', null]] },
+];
+
+export function Reports() {
+  useTitle('Hisobotlar');
+  return (
+    <main className="flex flex-col gap-6 p-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="m-0 text-3xl font-semibold tracking-[-0.02em]">Hisobotlar</h1>
+        <span className="text-sm text-sub">Klinika bo‘yicha statistika, moliya va xodimlar hisobotlari</span>
+      </div>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(420px,100%),1fr))] items-stretch gap-6">
+        {GROUPS.map((g) => (
+          <section key={g.title} className="app-card flex flex-col gap-2 rounded-card border border-line bg-white p-4">
+            <h2 className="m-0 mb-1 flex items-center gap-2 p-1 text-sm font-semibold tracking-[0.02em] text-primary uppercase"><g.icon size={18} />{g.title}</h2>
+            {g.items.map(([l, slug]) => slug
+              ? <Link key={l} to={`/reports/${slug}`} className="block rounded-[10px] border border-line bg-white px-3 py-[11px] text-center text-sm !text-fg no-underline hover:bg-surface">{l}</Link>
+              : <span key={l} title="Bu hisobot hali tayyor emas" className="block rounded-[10px] border border-dashed border-line px-3 py-[11px] text-center text-sm text-faint">{l} <span className="text-xs">· tez orada</span></span>)}
+          </section>
+        ))}
+      </div>
+    </main>
+  );
+}
+
+interface Table { title: string; cols: [string, string, ('money' | 'num' | 'date' | 'datetime')?][]; rows: Record<string, unknown>[] }
+
+/** Bitta jadval hisoboti: davr, filial, CSV va chop etish. */
+export function ReportPage({ slug }: { slug: string }) {
+  const { branches, branch } = useOrg();
+  const t = new Date();
+  const [from, setFrom] = useState(isoDate(new Date(t.getFullYear(), t.getMonth(), 1)));
+  const [to, setTo] = useState(isoDate(t));
+  const [br, setBr] = useState(branches.length > 1 ? '' : branch.id);
+  const q = useQuery({
+    queryKey: ['reports', 'table', slug, from, to, br], enabled: slug !== 'umumiy',
+    queryFn: () => http.get<Table>(`/api/reports/table/${slug}?from=${from}&to=${to}${br ? `&branch_id=${br}` : ''}`),
+  });
+  useTitle(q.data?.title ?? 'Hisobot');
+  if (slug === 'umumiy') return <Overview />;
+  const fmt = (v: unknown, k?: string) => v === null || v === undefined || v === '' ? '—' : k === 'money' ? money(Number(v)) : k === 'num' ? String(v) : k === 'date' ? dmy(String(v)) : k === 'datetime' ? dmyhm(String(v)) : String(v);
+  const d = q.data;
+  const sums = d?.cols.map(([k, , kind]) => (kind === 'money' ? d.rows.reduce((a, r) => a + Number(r[k] ?? 0), 0) : null));
+  return (
+    <main className="mx-auto flex max-w-[1300px] flex-col gap-4 p-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <Link to="/reports" className="inline-flex items-center gap-1.5 text-sm !text-sub no-underline print:hidden"><ArrowLeft size={15} /> Hisobotlar</Link>
+          <h1 className="m-0 text-[22px] font-semibold">{d?.title ?? '…'}</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 print:hidden">
+          {branches.length > 1 && (
+            <Select aria-label="Filial" value={br} onChange={(e) => setBr(e.target.value)} className="!h-8 !w-44"><option value="">Barcha filiallar</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select>
+          )}
+          <Input type="date" aria-label="Dan" value={from} onChange={(e) => setFrom(e.target.value)} className="!h-8 !w-40" />
+          <Input type="date" aria-label="Gacha" value={to} onChange={(e) => setTo(e.target.value)} className="!h-8 !w-40" />
+          {d && <button type="button" aria-label="Excel (CSV) ga yuklab olish" title="Excel (CSV) ga yuklab olish" onClick={() => downloadCsv(`${d.title}.csv`, [d.cols.map((c) => c[1]), ...d.rows.map((r) => d.cols.map(([k, , kind]) => (kind === 'money' || kind === 'num' ? Number(r[k] ?? 0) : fmt(r[k], kind))))])}
+            className="grid h-8 w-8 place-items-center rounded-lg text-sub hover:bg-muted"><Download size={16} /></button>}
+          <button type="button" aria-label="Chop etish" title="Chop etish" onClick={() => window.print()} className="grid h-8 w-8 place-items-center rounded-lg text-sub hover:bg-muted"><Printer size={16} /></button>
+        </div>
+      </div>
+      {q.isLoading || !d ? <PageLoader /> : d.rows.length === 0 ? <Card><Empty>Bu davrda ma’lumot yo‘q</Empty></Card> : (
+        <Card className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-muted text-xs font-semibold text-sub"><tr>{d.cols.map(([k, l, kind]) => <th key={k} className={cx('px-3 py-2 whitespace-nowrap', kind === 'money' || kind === 'num' ? 'text-right' : 'text-left')}>{l}</th>)}</tr></thead>
+            <tbody>{d.rows.map((r, i) => (
+              <tr key={i} className="border-t border-line">{d.cols.map(([k, , kind]) => <td key={k} className={cx('px-3 py-2', kind === 'money' || kind === 'num' ? 'text-right whitespace-nowrap' : '')}>{fmt(r[k], kind)}</td>)}</tr>
+            ))}</tbody>
+            {sums?.some((x) => x !== null) && <tfoot><tr className="border-t-2 border-line font-semibold">{d.cols.map(([k], i) => <td key={k} className={cx('px-3 py-2', sums[i] !== null && 'text-right')}>{i === 0 ? 'Jami' : sums[i] !== null ? money(sums[i]) : ''}</td>)}</tr></tfoot>}
+          </table>
+        </Card>
+      )}
+      <span className="text-xs text-sub">{d ? `${d.rows.length} ta qator` : ''}</span>
+    </main>
   );
 }

@@ -1,92 +1,237 @@
-import { useEffect, useRef, useState } from 'react';
-import { Menu, Palette, Pencil, Plus, Trash2, KeyRound, User, Users, Tag, ListOrdered, Building2 } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Menu, Palette, Pencil, Plus, Trash2, User, Users, Tag, ListOrdered, Building2, CalendarDays, Banknote, BookOpen } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOrg, ROLE_LABEL, ALL_PERMS, roleDefault } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
-import { initials, phoneFmt } from '@/lib/format';
+import { dmy, hm, initials, isoDate, phoneFmt } from '@/lib/format';
 import { useQueryParam, useTitle } from '@/lib/router';
 import type { Branch, Member, PatientStatus, Perm, PriceCategory, PriceItem, Role, Room } from '@/lib/types';
-import { Badge, Button, Card, Confirm, Empty, Field, Input, Modal, Select, Switch, cx } from '@/components/ui';
+import { Badge, Button, Card, Confirm, Empty, Field, Input, Modal, Select, Switch, Toggle, cx } from '@/components/ui';
 
-type Tab = 'profile' | 'staff' | 'branches' | 'statuses' | 'price';
+type Tab = 'profile' | 'clinic' | 'staff' | 'schedule' | 'price' | 'salary' | 'statuses' | 'dicts';
 
 export function Settings() {
   useTitle('Sozlamalar');
   const { can } = useOrg();
   const tabs: { key: Tab; label: string; icon: typeof User; show: boolean }[] = [
     { key: 'profile', label: 'Mening profilim', icon: User, show: true },
-    { key: 'staff', label: 'Xodimlar', icon: Users, show: can('staff.manage') },
-    { key: 'branches', label: 'Filiallar va kabinetlar', icon: Building2, show: can('settings.edit') },
-    { key: 'statuses', label: 'Bemor statuslari', icon: Tag, show: can('settings.edit') },
+    { key: 'clinic', label: 'Klinika', icon: Building2, show: can('settings.edit') },
+    { key: 'staff', label: 'Xodimlar va ruxsatlar', icon: Users, show: can('staff.manage') },
+    { key: 'schedule', label: 'Jadval', icon: CalendarDays, show: can('settings.edit') || can('schedule.edit') },
     { key: 'price', label: 'Prays', icon: ListOrdered, show: can('settings.edit') },
+    { key: 'salary', label: 'Maosh', icon: Banknote, show: can('staff.manage') },
+    { key: 'statuses', label: 'Bemor statuslari', icon: Tag, show: can('settings.edit') },
+    { key: 'dicts', label: 'Ma’lumotnomalar', icon: BookOpen, show: can('settings.edit') || can('cashbox.edit') },
   ];
-  const [tab, setTab] = useQueryParam<Tab>('tab', 'profile');
+  const [tab0, setTab] = useQueryParam<Tab>('tab', 'profile');
+  const tab: Tab = (tab0 as string) === 'branches' ? 'clinic' : tab0;
   const cur = tabs.find((t) => t.key === tab && t.show) ? tab : 'profile';
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <div className="flex flex-wrap items-center gap-1">
+    <div className="flex flex-col gap-4 p-6">
+      <h1 className="m-0 text-3xl font-semibold tracking-[-0.02em]">Sozlamalar</h1>
+      <div role="tablist" className="flex flex-wrap items-center gap-1 self-start rounded-[10px] bg-muted p-1">
         {tabs.filter((t) => t.show).map((t) => (
           <button key={t.key} role="tab" aria-selected={cur === t.key} type="button" onClick={() => setTab(t.key)}
-            className={cx('inline-flex h-8 items-center gap-1.5 rounded-[10px] px-3 text-sm font-medium', cur === t.key ? 'bg-nav text-nav-fg' : 'text-sub hover:bg-muted hover:text-fg')}>
-            <t.icon size={15} /> {t.label}
+            className={cx('inline-flex h-[30px] items-center gap-2 rounded-lg px-3 text-[15px] whitespace-nowrap', cur === t.key ? 'bg-white font-medium text-fg shadow-[0_1px_3px_rgba(7,18,30,.12)]' : 'text-sub hover:text-fg')}>
+            <t.icon size={16} /> {t.label}
           </button>
         ))}
       </div>
       {cur === 'profile' && <Profile />}
+      {cur === 'clinic' && <Clinic />}
       {cur === 'staff' && <Staff />}
-      {cur === 'branches' && <Branches />}
-      {cur === 'statuses' && <Statuses />}
+      {cur === 'schedule' && <ScheduleTab />}
       {cur === 'price' && <Price />}
+      {cur === 'salary' && <Salary />}
+      {cur === 'statuses' && <Statuses />}
+      {cur === 'dicts' && <Dicts />}
     </div>
   );
 }
 
+/** Maketdagi sozlamalar kartasi: sarlavha va qatorlar (chapda nom va izoh, o'ngda boshqaruv). */
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="max-w-[980px] rounded-card border border-line bg-white px-5 pt-3 pb-2">
+      <h2 className="m-0 border-b border-line pb-2 text-base font-semibold">{title}</h2>
+      <div className="flex flex-col">{children}</div>
+    </section>
+  );
+}
+function Item({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-2.5 last:border-b-0">
+      <div className="flex min-w-[200px] flex-col"><span className="text-[15px]">{label}</span>{hint && <span className="text-xs text-sub">{hint}</span>}</div>
+      <div className="flex w-full max-w-[220px] justify-end sm:w-auto">{children}</div>
+    </div>
+  );
+}
+const SIN = 'h-8 w-[220px] max-w-full rounded-lg border border-line bg-white px-2.5 text-[15px]';
+
 // ---------------- Profil ----------------
 function Profile() {
-  const { user, me, org, refresh, can } = useOrg();
+  const { user, me, refresh } = useOrg();
   const qc = useQueryClient();
   const [name, setName] = useState(user?.full_name ?? '');
   const [pw, setPw] = useState({ current: '', next: '', again: '' });
-  const [orgName, setOrgName] = useState(org.name);
   const save = useAction(() => http.patch('/api/me', { full_name: name }), { success: 'Saqlandi', onDone: () => { void refresh(); } });
   const savePw = useAction(() => {
     if (pw.next !== pw.again) throw new Error('Yangi parollar mos emas');
     return http.post('/api/auth/password', { current: pw.current, next: pw.next });
   }, { success: 'Parol o‘zgartirildi', onDone: () => setPw({ current: '', next: '', again: '' }) });
-  const saveOrg = useAction(() => http.patch('/api/org', { name: orgName }), { success: 'Saqlandi', onDone: () => { void refresh(); } });
   const logoutAll = useAction(() => http.post('/api/auth/logout-all'), { onDone: () => { qc.clear(); void refresh(); } });
   return (
-    <div className="grid max-w-4xl gap-4 md:grid-cols-2">
-      <Card className="flex flex-col gap-3 p-5">
-        <h2 className="m-0 text-base font-semibold">Shaxsiy ma’lumotlar</h2>
-        <div className="flex items-center gap-3">
-          <span className="grid h-12 w-12 place-items-center rounded-full bg-nav text-base font-semibold">{initials(name)}</span>
-          <div className="text-sm"><div className="font-medium">{ROLE_LABEL[me.role]}</div><div className="text-sub">{user?.email ?? phoneFmt(user?.phone)}</div></div>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-0.5"><h2 className="m-0 text-lg font-semibold">Mening profilim</h2><span className="text-[13px] text-sub">Faqat sizga tegishli sozlamalar. Har bir xodim o‘zinikini o‘zgartiradi.</span></div>
+      <Group title="Shaxsiy ma’lumotlar">
+        <Item label="Familiya va ism"><input aria-label="Familiya va ism" className={SIN} value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== user?.full_name && save.mutate(undefined)} /></Item>
+        <Item label="Login" hint="Tizimga kirish uchun. O‘zgartirish uchun klinika rahbariga murojaat qiling"><input aria-label="Login" className={SIN} value={user?.email ?? phoneFmt(user?.phone)} disabled /></Item>
+        <Item label="Lavozim"><span className="text-[15px]">{ROLE_LABEL[me.role]}</span></Item>
+      </Group>
+      <Group title="Xavfsizlik">
+        <Item label="Joriy parol"><input type="password" aria-label="Joriy parol" autoComplete="current-password" className={SIN} value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></Item>
+        <Item label="Yangi parol" hint="Kamida 8 belgi"><input type="password" aria-label="Yangi parol" autoComplete="new-password" className={SIN} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></Item>
+        <Item label="Yangi parolni takrorlang"><input type="password" aria-label="Yangi parolni takrorlang" autoComplete="new-password" className={SIN} value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} /></Item>
+        <div className="flex flex-wrap justify-end gap-2 py-2.5">
+          <Button size="sm" variant="ghost" onClick={() => logoutAll.mutate(undefined)}>Barcha qurilmalardan chiqish</Button>
+          <Button size="sm" variant="primary" loading={savePw.isPending} disabled={!pw.current || !pw.next} onClick={() => savePw.mutate(undefined)}>Parolni yangilash</Button>
         </div>
-        <Field label="Familiya va ism">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} />}</Field>
-        <div><Button variant="primary" loading={save.isPending} onClick={() => save.mutate(undefined)}>Saqlash</Button></div>
-      </Card>
-      <Card className="flex flex-col gap-3 p-5">
-        <h2 className="m-0 flex items-center gap-2 text-base font-semibold"><KeyRound size={16} /> Parolni o‘zgartirish</h2>
-        <Field label="Joriy parol">{(id) => <Input id={id} type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />}</Field>
-        <Field label="Yangi parol" hint="Kamida 8 belgi">{(id) => <Input id={id} type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />}</Field>
-        <Field label="Yangi parolni takrorlang">{(id) => <Input id={id} type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} />}</Field>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="primary" loading={savePw.isPending} disabled={!pw.current || !pw.next} onClick={() => savePw.mutate(undefined)}>Parolni yangilash</Button>
-          <Button variant="ghost" onClick={() => logoutAll.mutate(undefined)}>Barcha qurilmalardan chiqish</Button>
-        </div>
-      </Card>
+      </Group>
+    </div>
+  );
+}
+
+// ---------------- Klinika ----------------
+function Clinic() {
+  const { org, refresh } = useOrg();
+  const [orgName, setOrgName] = useState(org.name);
+  const upd = useAction((patch: Record<string, unknown>) => http.patch('/api/org', patch), { success: 'Saqlandi', onDone: () => { void refresh(); } });
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-0.5"><h2 className="m-0 text-lg font-semibold">Klinika sozlamalari</h2><span className="text-[13px] text-sub">Butun klinika uchun. Faqat egasi va administratorlar o‘zgartiradi.</span></div>
+      <Group title="Klinika">
+        <Item label="Klinika nomi"><input aria-label="Klinika nomi" className={SIN} value={orgName} onChange={(e) => setOrgName(e.target.value)} onBlur={() => orgName.trim() && orgName !== org.name && upd.mutate({ name: orgName.trim() })} /></Item>
+        <Item label="Qoldiq yetmasa ham material chiqarish" hint="Akt yopilganda omborda yetarli material bo‘lmasa, qoldiq manfiy bo‘ladi">
+          <Toggle on={org.allow_negative_stock} label="Qoldiq yetmasa ham material chiqarish" onChange={(v) => upd.mutate({ allow_negative_stock: v })} />
+        </Item>
+      </Group>
+      <Branches />
+    </div>
+  );
+}
+
+// ---------------- Jadval ----------------
+interface Res { id: string; branch_id: string; room_id: string | null; starts_at: string; ends_at: string; reason: string }
+interface Shift { id: string; member_id: string; room_id: string | null; shift_date: string; starts_at: string; ends_at: string }
+function ScheduleTab() {
+  const { branch, can, refresh, members } = useOrg();
+  const rooms = useList<Room>('rooms', { branch_id: branch.id, is_active: true });
+  const t0 = isoDate(new Date());
+  const res = useList<Res>('time_reservations', { branch_id: branch.id, 'starts_at.gte': new Date(t0 + 'T00:00:00').toISOString() }, { limit: 50 });
+  const shifts = useList<Shift>('staff_shifts', { branch_id: branch.id, 'shift_date.gte': t0 }, { limit: 100 });
+  const [b, setB] = useState({ slot_minutes: branch.slot_minutes, days_visible: branch.days_visible, work_start: branch.work_start.slice(0, 5), work_end: branch.work_end.slice(0, 5) });
+  const [r, setR] = useState({ date: t0, from: '13:00', to: '14:00', reason: 'Tushlik', room_id: '' });
+  const [sh, setSh] = useState({ member_id: '', date: t0, from: branch.work_start.slice(0, 5), to: branch.work_end.slice(0, 5), room_id: '' });
+  const staff = members.filter((m) => m.is_active && m.role !== 'doctor');
+  const mm = byId(members), rm = byId(rooms.data);
+  const saveBranch = useAction(() => db.update('branches', branch.id, b), { success: 'Saqlandi', onDone: () => { void refresh(); } });
+  const at = (d: string, t: string) => new Date(`${d}T${t}:00`).toISOString();
+  const addRes = useAction(() => db.insert('time_reservations', { branch_id: branch.id, room_id: r.room_id || null, starts_at: at(r.date, r.from), ends_at: at(r.date, r.to), reason: r.reason }), { invalidate: ['time_reservations'], success: 'Vaqt band qilindi' });
+  const delRes = useAction((id: string) => db.remove('time_reservations', id), { invalidate: ['time_reservations'] });
+  const addShift = useAction(() => db.insert('staff_shifts', { branch_id: branch.id, member_id: sh.member_id, room_id: sh.room_id || null, shift_date: sh.date, starts_at: sh.from, ends_at: sh.to }), { invalidate: ['staff_shifts'], success: 'Smena qo‘shildi' });
+  const delShift = useAction((id: string) => db.remove('staff_shifts', id), { invalidate: ['staff_shifts'] });
+  const IN = 'h-8 rounded-lg border border-line bg-white px-2 text-sm';
+  return (
+    <div className="flex flex-col gap-4">
       {can('settings.edit') && (
-        <Card className="flex flex-col gap-3 p-5 md:col-span-2">
-          <h2 className="m-0 text-base font-semibold">Klinika</h2>
-          <div className="flex flex-wrap items-end gap-2">
-            <Field label="Klinika nomi" className="min-w-[260px] flex-1">{(id) => <Input id={id} value={orgName} onChange={(e) => setOrgName(e.target.value)} />}</Field>
-            <Button loading={saveOrg.isPending} onClick={() => saveOrg.mutate(undefined)}>Saqlash</Button>
-          </div>
-        </Card>
+        <Group title={`Jadval ko‘rinishi · ${branch.name}`}>
+          <Item label="Ish kuni boshlanishi"><input type="time" aria-label="Ish kuni boshlanishi" className={SIN} value={b.work_start} onChange={(e) => setB({ ...b, work_start: e.target.value })} /></Item>
+          <Item label="Ish kuni tugashi"><input type="time" aria-label="Ish kuni tugashi" className={SIN} value={b.work_end} onChange={(e) => setB({ ...b, work_end: e.target.value })} /></Item>
+          <Item label="Qabul qadami" hint="Jadvalni bosganda yangi qabul shu qadamga yaxlitlanadi">
+            <select aria-label="Qabul qadami" className={SIN} value={b.slot_minutes} onChange={(e) => setB({ ...b, slot_minutes: Number(e.target.value) })}>{[10, 15, 20, 30, 60].map((m) => <option key={m} value={m}>{m} daqiqa</option>)}</select>
+          </Item>
+          <Item label="Ko‘rsatiladigan kunlar soni" hint="Har bir xodim jadval sozlamalarida o‘zi uchun o‘zgartira oladi">
+            <select aria-label="Kunlar soni" className={SIN} value={b.days_visible} onChange={(e) => setB({ ...b, days_visible: Number(e.target.value) })}>{[1, 2, 3, 4, 5, 6, 7].map((m) => <option key={m} value={m}>{m}</option>)}</select>
+          </Item>
+          <div className="flex justify-end py-2.5"><Button size="sm" variant="primary" loading={saveBranch.isPending} onClick={() => saveBranch.mutate(undefined)}>Saqlash</Button></div>
+        </Group>
       )}
+      {can('schedule.edit', branch.id) && <>
+        <Group title="Vaqtni band qilish (tushlik, yig‘ilish, ta’mir)">
+          <div className="flex flex-wrap items-center gap-2 py-2.5">
+            <input type="date" aria-label="Sana" className={IN} value={r.date} onChange={(e) => setR({ ...r, date: e.target.value })} />
+            <input type="time" aria-label="Dan" className={IN} value={r.from} onChange={(e) => setR({ ...r, from: e.target.value })} />
+            <input type="time" aria-label="Gacha" className={IN} value={r.to} onChange={(e) => setR({ ...r, to: e.target.value })} />
+            <input aria-label="Sabab" className={cx(IN, 'w-40')} value={r.reason} onChange={(e) => setR({ ...r, reason: e.target.value })} />
+            <select aria-label="Kabinet" className={IN} value={r.room_id} onChange={(e) => setR({ ...r, room_id: e.target.value })}><option value="">Barcha kabinetlar</option>{(rooms.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
+            <Button size="sm" disabled={!r.reason.trim()} loading={addRes.isPending} onClick={() => addRes.mutate(undefined)}>Band qilish</Button>
+          </div>
+          {(res.data ?? []).map((x) => (
+            <div key={x.id} className="flex items-center gap-3 border-t border-line py-2 text-sm">
+              <span className="w-28 text-sub">{dmy(x.starts_at)}</span><span className="w-28">{hm(x.starts_at)} – {hm(x.ends_at)}</span>
+              <span className="flex-1">{x.reason}{x.room_id && <span className="text-sub"> · {rm.get(x.room_id)?.name}</span>}</span>
+              <button type="button" aria-label="O‘chirish" onClick={() => delRes.mutate(x.id)} className="text-faint hover:text-bad"><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </Group>
+        <Group title="Ish va dam olish kunlari (xodimlar smenasi)">
+          <div className="flex flex-wrap items-center gap-2 py-2.5">
+            <select aria-label="Xodim" className={IN} value={sh.member_id} onChange={(e) => setSh({ ...sh, member_id: e.target.value })}><option value="">Xodimni tanlang</option>{staff.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}</select>
+            <input type="date" aria-label="Sana" className={IN} value={sh.date} onChange={(e) => setSh({ ...sh, date: e.target.value })} />
+            <input type="time" aria-label="Dan" className={IN} value={sh.from} onChange={(e) => setSh({ ...sh, from: e.target.value })} />
+            <input type="time" aria-label="Gacha" className={IN} value={sh.to} onChange={(e) => setSh({ ...sh, to: e.target.value })} />
+            <select aria-label="Kabinet" className={IN} value={sh.room_id} onChange={(e) => setSh({ ...sh, room_id: e.target.value })}><option value="">—</option>{(rooms.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
+            <Button size="sm" disabled={!sh.member_id} loading={addShift.isPending} onClick={() => addShift.mutate(undefined)}>Smena qo‘shish</Button>
+          </div>
+          {(shifts.data ?? []).map((x) => (
+            <div key={x.id} className="flex items-center gap-3 border-t border-line py-2 text-sm">
+              <span className="w-28 text-sub">{dmy(x.shift_date)}</span><span className="w-28">{x.starts_at.slice(0, 5)} – {x.ends_at.slice(0, 5)}</span>
+              <span className="flex-1">{mm.get(x.member_id)?.full_name}{x.room_id && <span className="text-sub"> · {rm.get(x.room_id)?.name}</span>}</span>
+              <button type="button" aria-label="O‘chirish" onClick={() => delShift.mutate(x.id)} className="text-faint hover:text-bad"><Trash2 size={14} /></button>
+            </div>
+          ))}
+          <p className="m-0 py-2 text-xs text-sub">Smenalar jadvalning «Assistentlar» va «Administratorlar» ko‘rinishida chiqadi (jadval sozlamalari → Jadval turi).</p>
+        </Group>
+      </>}
+    </div>
+  );
+}
+
+// ---------------- Maosh ----------------
+function Salary() {
+  return (
+    <Group title="Xodimlar maoshi">
+      <div className="py-6 text-sm text-sub">
+        Ish haqi hisoblash (stavkalar va bajarilgan ishlar bo‘yicha foiz) hali qo‘shilmagan. Hozircha xodimga berilgan pulni
+        Kassa → «Xarajat» orqali, kontragent sifatida xodimni tanlab kiritish mumkin.
+      </div>
+    </Group>
+  );
+}
+
+// ---------------- Ma'lumotnomalar ----------------
+interface Tpl { id: string; name: string; stages: unknown[] }
+function Dicts() {
+  const tpls = useList<Tpl>('plan_templates');
+  const del = useAction((id: string) => db.remove('plan_templates', id), { invalidate: ['plan_templates'], success: 'Shablon o‘chirildi' });
+  const cats = useList<{ id: string; name: string; archived: boolean }>('expense_categories');
+  return (
+    <div className="grid max-w-[980px] gap-4 md:grid-cols-2">
+      <Group title="Davolash rejasi shablonlari">
+        {(tpls.data ?? []).map((t) => (
+          <div key={t.id} className="flex items-center gap-3 border-b border-line py-2 text-sm last:border-b-0">
+            <span className="flex-1">{t.name}</span><span className="text-sub">{t.stages.length} bosqich</span>
+            <button type="button" aria-label="O‘chirish" onClick={() => del.mutate(t.id)} className="text-faint hover:text-bad"><Trash2 size={14} /></button>
+          </div>
+        ))}
+        {tpls.data?.length === 0 && <div className="py-4 text-sm text-sub">Shablon yo‘q. Bemor kartasida reja sozlamalari → «Shablon sifatida saqlash».</div>}
+      </Group>
+      <Group title="Xarajat kategoriyalari">
+        {(cats.data ?? []).filter((c) => !c.archived).map((c) => <div key={c.id} className="border-b border-line py-2 text-sm last:border-b-0">{c.name}</div>)}
+        <div className="py-2 text-xs text-sub">Tahrirlash: Kassa → sozlamalar (⚙).</div>
+      </Group>
     </div>
   );
 }

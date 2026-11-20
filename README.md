@@ -1,6 +1,6 @@
 # Tish Duxtir
 
-Stomatologiya klinikalari tarmog'i uchun dastur: jadval, bemorlar, kassa, ombor (FIFO), hisobotlar. Bir nechta filial bilan ishlaydi; bemorlar barcha filiallar uchun umumiy.
+Stomatologiya klinikalari tarmog'i uchun dastur: jadval, bemorlar, davolash rejalari, kassa, ombor (FIFO), hisobotlar. Bir nechta filial bilan ishlaydi; bemorlar barcha filiallar uchun umumiy.
 
 ## Tuzilishi
 
@@ -42,7 +42,7 @@ ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw --force enable
 Repozitoriy yopiq (private) bo'lsa, GitHub sizdan login so'raydi: parol o'rniga GitHub'da yaratilgan token (Settings → Developer settings → Personal access tokens) kiritiladi.
 
 ```bash
-git clone -b claude/eloquent-euler-qavaku https://github.com/baxtishodibrohimov-rgb/tish-duxtir.git /opt/tish-duxtir
+git clone -b claude/compassionate-fermi-ofdblr https://github.com/baxtishodibrohimov-rgb/tish-duxtir.git /opt/tish-duxtir
 ```
 
 ```bash

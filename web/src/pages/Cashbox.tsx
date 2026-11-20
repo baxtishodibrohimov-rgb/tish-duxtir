@@ -530,8 +530,8 @@ function Rates() {
     <div className="flex max-w-xl flex-col gap-3">
       {can('cashbox.edit') && (
         <Card className="flex flex-wrap items-end gap-2 p-4">
-          <Field label="Valyuta">{(id) => <Select id={id} value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })} className="w-24"><option>USD</option><option>EUR</option><option>RUB</option></Select>}</Field>
-          <Field label="Kurs (1 birlik = so‘m)">{(id) => <Input id={id} type="number" value={f.rate} onChange={(e) => setF({ ...f, rate: e.target.value })} className="w-40" />}</Field>
+          <Field label="Valyuta">{(id) => <Select id={id} value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })} className="!w-24"><option>USD</option><option>EUR</option><option>RUB</option></Select>}</Field>
+          <Field label="Kurs (1 birlik = so‘m)">{(id) => <Input id={id} type="number" value={f.rate} onChange={(e) => setF({ ...f, rate: e.target.value })} className="!w-40" />}</Field>
           <Field label="Sana">{(id) => <Input id={id} type="date" value={f.rate_date} onChange={(e) => setF({ ...f, rate_date: e.target.value })} />}</Field>
           <Button variant="primary" disabled={!(Number(f.rate) > 0)} onClick={() => add.mutate(undefined)}>Saqlash</Button>
         </Card>

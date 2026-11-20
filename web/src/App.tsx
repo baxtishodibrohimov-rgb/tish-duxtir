@@ -11,7 +11,7 @@ import { NewPatient } from './pages/NewPatient';
 import { Assistant } from './pages/Assistant';
 import { Cashbox } from './pages/Cashbox';
 import { Warehouse } from './pages/warehouse/Warehouse';
-import { Reports } from './pages/Reports';
+import { Reports, ReportPage } from './pages/Reports';
 import { Settings } from './pages/Settings';
 import type { Perm } from './lib/types';
 
@@ -23,6 +23,7 @@ const ROUTES: { path: string; perm: Perm | null; render: (p: Record<string, stri
   { path: '/cashbox', perm: 'cashbox.view', render: () => <Cashbox /> },
   { path: '/warehouse', perm: 'warehouse.view', render: () => <Warehouse /> },
   { path: '/reports', perm: 'reports.view', render: () => <Reports /> },
+  { path: '/reports/:slug', perm: 'reports.view', render: (p) => <ReportPage slug={p.slug!} /> },
   { path: '/ai', perm: null, render: () => <Assistant /> },
   { path: '/settings', perm: null, render: () => <Settings /> },
 ];

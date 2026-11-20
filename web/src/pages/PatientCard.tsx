@@ -243,7 +243,7 @@ export function ServicePicker({ onPick, onClose, withTooth }: { onPick: (l: { it
         <Button variant="primary" disabled={!sel.length} onClick={() => onPick(sel.map((item) => ({ item, tooth })))}>Qo‘shish</Button></>}>
       <div className="mb-3 flex gap-2">
         <Input placeholder="Qidirish: nomi yoki kodi" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
-        {withTooth && <Input className="w-28" placeholder="Tish №" value={tooth} onChange={(e) => setTooth(e.target.value)} aria-label="Tish raqami" />}
+        {withTooth && <Input className="!w-28" placeholder="Tish №" value={tooth} onChange={(e) => setTooth(e.target.value)} aria-label="Tish raqami" />}
       </div>
       <div className="max-h-[50vh] overflow-y-auto">
         {(cats.data ?? []).map((c) => {
@@ -363,7 +363,7 @@ function FilesTab({ p }: { p: Patient }) {
     <div className="flex flex-col gap-3">
       {can('patients.edit') && (
         <Card className="flex flex-wrap items-center gap-2 p-4">
-          <Select value={kind} onChange={(e) => setKind(e.target.value)} className="w-40" aria-label="Fayl turi">
+          <Select value={kind} onChange={(e) => setKind(e.target.value)} className="!w-40" aria-label="Fayl turi">
             <option value="xray">Rentgen</option><option value="image">Rasm</option><option value="audio">Ovozli izoh</option><option value="file">Hujjat</option>
           </Select>
           <label className={cx('inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-[10px] bg-primary px-3.5 text-sm font-medium text-white hover:bg-primary-hover', busy && 'opacity-60')}>
