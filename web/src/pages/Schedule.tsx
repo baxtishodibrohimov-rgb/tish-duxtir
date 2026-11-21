@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
-import { ChevronLeft, ChevronRight, Settings as Gear, Stethoscope, Users, UserCog, Printer, SlidersHorizontal, CalendarDays, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Settings as Gear, Stethoscope, Users, UserCog, Printer, SlidersHorizontal, CalendarDays, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { useAction, useList, byId } from '@/lib/hooks';
 import { db, http } from '@/lib/api';
@@ -472,8 +472,21 @@ function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy, onWorks 
 
 /** "Jadval ko'rinishi" oynasi. */
 function ViewSettings({ view, rooms, viewBr, ownBr, onClose, onSave }: { view: View; rooms: Room[]; viewBr: string; ownBr: string; onClose: () => void; onSave: (v: View, br: string) => void }) {
-  const { members, branches } = useOrg();
+  const { members, branches, can } = useOrg();
   const [g, setG] = useState(view);
+  // Kabinetlarni shu yerning o'zida qo'shish, nomini o'zgartirish va o'chirish (faqat o'z filiali jadvalida).
+  const editRooms = viewBr === ownBr && can('settings.edit', viewBr);
+  const [newRoom, setNewRoom] = useState('');
+  const [delRoom, setDelRoom] = useState<string | null>(null);
+  const addRoom = useAction((name: string) => db.insert('rooms', { branch_id: viewBr, name, position: rooms.length ? Math.max(...rooms.map((r) => r.position ?? 0)) + 1 : 0 }),
+    { invalidate: ['rooms'], success: 'Kabinet qo‘shildi', onDone: () => setNewRoom('') });
+  const renRoom = useAction(({ id, name }: { id: string; name: string }) => db.update('rooms', id, { name }), { invalidate: ['rooms'] });
+  // Qabullari bor kabinet tarix uchun saqlanadi, faqat jadvaldan olib tashlanadi; bo'sh kabinet butunlay o'chiriladi.
+  const removeRoom = useAction(async (r: Room) => {
+    const used = await db.list('visits', { room_id: r.id }, { limit: 1 });
+    if (used.length) await db.update('rooms', r.id, { is_active: false });
+    else await db.remove('rooms', r.id);
+  }, { invalidate: ['rooms'], success: 'Kabinet o‘chirildi', onDone: () => setDelRoom(null) });
   const [br, setBr] = useState(viewBr);
   const [more, setMore] = useState(false);
   const doctors = members.filter((m) => m.is_active && ['doctor', 'owner'].includes(m.role));
@@ -522,11 +535,29 @@ function ViewSettings({ view, rooms, viewBr, ownBr, onClose, onSave }: { view: V
               {rooms.map((r) => {
                 const on = !g.hiddenRooms.includes(r.id);
                 return (
-                  <div key={r.id} className="flex items-center gap-3.5"><span className="min-w-20">{r.name}</span>
-                    <Toggle on={on} label={r.name} onChange={() => setG({ ...g, hiddenRooms: on ? [...g.hiddenRooms, r.id] : g.hiddenRooms.filter((x) => x !== r.id) })} /></div>
+                  <div key={r.id} className="flex items-center gap-2.5">
+                    {editRooms
+                      ? <input defaultValue={r.name} aria-label="Kabinet nomi" onBlur={(e) => { const n = e.target.value.trim(); if (n && n !== r.name) renRoom.mutate({ id: r.id, name: n }); }}
+                          className="h-8 w-40 rounded border border-line px-2 text-sm focus:border-primary focus:outline-none" />
+                      : <span className="min-w-20">{r.name}</span>}
+                    <Toggle on={on} label={r.name} onChange={() => setG({ ...g, hiddenRooms: on ? [...g.hiddenRooms, r.id] : g.hiddenRooms.filter((x) => x !== r.id) })} />
+                    {editRooms && (delRoom === r.id
+                      ? <span className="flex items-center gap-1.5 text-xs"><span className="text-bad">O‘chirilsinmi?</span>
+                          <button type="button" onClick={() => removeRoom.mutate(r)} className="rounded bg-bad px-2 py-1 text-white">Ha</button>
+                          <button type="button" onClick={() => setDelRoom(null)} className="px-1 text-sub">Yo‘q</button></span>
+                      : <button type="button" aria-label={`${r.name} ni o‘chirish`} title="Kabinetni o‘chirish" onClick={() => setDelRoom(r.id)}
+                          className="grid h-8 w-8 place-items-center rounded text-sub hover:bg-bad-soft hover:text-bad"><Trash2 size={15} /></button>)}
+                  </div>
                 );
               })}
-              {rooms.length === 0 && <span className="text-sm text-sub">Kabinetlar Sozlamalar → Klinika bo‘limida qo‘shiladi.</span>}
+              {rooms.length === 0 && <span className="text-sm text-sub">Bu filialda hali kabinet yo‘q.</span>}
+              {editRooms && (
+                <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (newRoom.trim()) addRoom.mutate(newRoom.trim()); }}>
+                  <input value={newRoom} onChange={(e) => setNewRoom(e.target.value)} placeholder={`Masalan: Kabinet ${rooms.length + 1}`} aria-label="Yangi kabinet nomi"
+                    className="h-8 w-40 rounded border border-line px-2 text-sm focus:border-primary focus:outline-none" />
+                  <button type="submit" disabled={!newRoom.trim() || addRoom.isPending} className="inline-flex h-8 items-center gap-1 rounded bg-primary px-3 text-sm text-white disabled:opacity-50"><Plus size={14} /> Kabinet qo‘shish</button>
+                </form>
+              )}
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-8">
