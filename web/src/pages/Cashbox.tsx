@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Plus, Banknote, CreditCard, Smartphone, Landmark, Pencil, Trash2, Settings as Gear, WalletCards, ListChecks, Users, TrendingDown, X, UserRound, Download, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Plus, Banknote, CreditCard, Smartphone, Landmark, Pencil, Trash2, Settings as Gear, WalletCards, ListChecks, Users, TrendingDown, X, UserRound, Download, Wallet, ChevronDown, ChevronRight, Stethoscope } from 'lucide-react';
 import { downloadCsv } from './warehouse/Docs';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
-import { addDays, dmy, dmyhm, initials, isoDate, money, som } from '@/lib/format';
+import { addDays, dmy, dmyhm, hm, initials, isoDate, money, som } from '@/lib/format';
 import { useQueryParam, useTitle } from '@/lib/router';
 import type { Cashbox as Box, Counterparty, ExpenseCategory, MoneyMove, Patient } from '@/lib/types';
 import { CounterpartyForm, CP_TYPE } from '@/components/CounterpartyForm';
@@ -94,25 +94,91 @@ export function Cashbox() {
 interface Summary { work_done: number; income: number; expense: number; profit: number; cashboxes: { cashbox_id: string; name: string; method: string; balance: number; period_income: number }[] }
 const METHOD_COLOR: Record<string, string> = { cash: 'text-ok', terminal: 'text-primary', click: 'text-[#9333ea]', bank: 'text-sub', other: 'text-sub' };
 
+interface Details {
+  work: { patient_id: string; who: string; doc: string | null; work: number; paid: number }[];
+  income: { id: string; at: string; kind: string; amount: number; who: string | null; box: string; by_name: string | null; doctor_id: string | null; doc: string | null }[];
+  expense: { id: string; at: string; amount: number; box: string; by_name: string | null; who: string }[];
+  share_percent: number;
+}
+type CardKey = 'ish' | 'pul' | 'xar' | 'foyda';
+
 function Boxes() {
   const { branch } = useOrg();
   const t = today();
   const s = useQuery({ queryKey: ['cash', 'summary', branch.id, t], queryFn: () => http.get<Summary>(`/api/cash/summary?branch_id=${branch.id}&from=${t}&to=${t}`) });
+  const det = useQuery({ queryKey: ['cash', 'details', branch.id, t], queryFn: () => http.get<Details>(`/api/cash/details?branch_id=${branch.id}&from=${t}&to=${t}`) });
+  const [open, setOpen] = useState<CardKey | null>(null);
+  const [doc, setDoc] = useState<string | null>(null);
+  const incomeRows = useMemo(() => (det.data?.income ?? []).filter((m) => m.kind === 'income'), [det.data]);
+  const docs = useDocs(incomeRows);
   if (s.isLoading) return <PageLoader />;
   const d = s.data!;
-  const cards: [string, number, string][] = [
-    ['qilingan ish', d.work_done, 'text-fg'], ['kassaga tushgan pul', d.income, 'text-ok'], ['xarajat', d.expense, 'text-[#b91c1c]'], ['foyda', d.profit, d.profit >= 0 ? 'text-[#0284c7]' : 'text-[#b91c1c]'],
+  const x = det.data;
+  const cards: [CardKey, string, number, string][] = [
+    ['ish', 'qilingan ish', d.work_done, 'text-fg'], ['pul', 'kassaga tushgan pul', d.income, 'text-ok'], ['xar', 'xarajat', d.expense, 'text-[#b91c1c]'], ['foyda', 'foyda', d.profit, d.profit >= 0 ? 'text-[#0086b8]' : 'text-[#b91c1c]'],
   ];
+  const titles: Record<CardKey, string> = { ish: 'Qilingan ish — har bir bemor bo‘yicha', pul: 'Kassaga tushgan pul — har bir to‘lov', xar: 'Xarajat — har bir chiqim', foyda: 'Foyda qanday hisoblandi' };
+  const pct = x?.share_percent ?? 30;
+  const allIn = incomeRows.reduce((a, m) => a + m.amount, 0);
+  const TH_ = 'px-3 py-2 font-medium';
+  const NUM = 'px-3 py-2 text-right whitespace-nowrap tabular-nums';
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-3">
-        {cards.map(([l, v, c]) => (
-          <section key={l} className="app-card flex flex-[1_1_240px] flex-col gap-2 rounded-card border border-line bg-white p-6">
-            <span className="text-sm text-sub">Bugun — {l}</span>
+        {cards.map(([k, l, v, c]) => (
+          <button key={k} type="button" onClick={() => setOpen(open === k ? null : k)} aria-expanded={open === k}
+            className={cx('flex flex-[1_1_240px] flex-col items-start gap-2 rounded-card border p-6 text-left shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]',
+              open === k ? 'border-primary bg-[#f3fafd] shadow-[0_0_0_3px_rgba(0,161,219,.15)]' : 'border-line bg-white hover:border-[#b6e3f4]')}>
+            <span className="flex w-full items-center justify-between text-sm text-sub">Bugun — {l}<ChevronDown size={16} className={cx('transition-transform', open === k && 'rotate-180')} /></span>
             <span className={cx('text-[32px] leading-tight font-bold tracking-[-0.02em]', c)}>{som(v)}</span>
-          </section>
+          </button>
         ))}
       </div>
+      {open && (
+        <section className="overflow-hidden rounded-2xl border border-[#b6e3f4] bg-white shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]">
+          <div className="flex items-center gap-2 border-b border-line bg-[#f3fafd] px-4 py-3">
+            <h3 className="m-0 flex-1 text-[15px] font-semibold">{titles[open]}</h3>
+            <button type="button" onClick={() => setOpen(null)} aria-label="Yopish" className="grid h-7 w-7 place-items-center rounded-md text-sub"><X size={16} /></button>
+          </div>
+          <div className="overflow-x-auto">
+            {!x ? <div className="p-4"><PageLoader /></div> : open === 'foyda' ? (
+              <div className="flex max-w-[520px] flex-col px-4 pt-2 pb-3.5">
+                <div className="flex justify-between gap-4 border-b border-line py-2.5"><span>Kassaga tushgan pul</span><b className="text-ok tabular-nums">+ {som(d.income)}</b></div>
+                <div className="flex justify-between gap-4 border-b border-line py-2.5"><span>Xarajat</span><b className="text-[#b91c1c] tabular-nums">− {som(d.expense)}</b></div>
+                <div className="flex justify-between gap-4 pt-3 text-base"><b>Foyda</b><b className="text-[#0086b8] tabular-nums">= {som(d.profit)}</b></div>
+                <span className="mt-2 text-xs text-sub">Foyda kassaga haqiqatda tushgan pul bo‘yicha hisoblanadi, qilingan ish bo‘yicha emas.</span>
+              </div>
+            ) : (
+              <table className="w-full min-w-[640px] border-collapse text-sm">
+                <thead className="bg-muted/50"><tr className="text-left text-xs text-sub uppercase">
+                  {open === 'ish' && <><th className={TH_}>Bemor</th><th className={TH_}>Shifokor</th><th className={cx(TH_, 'text-right')}>Qilingan ish</th><th className={cx(TH_, 'text-right')}>To‘langan</th><th className={cx(TH_, 'text-right')}>Qarz</th></>}
+                  {open === 'pul' && <><th className={TH_}>Vaqt</th><th className={TH_}>Bemor</th><th className={TH_}>Shifokor</th><th className={TH_}>To‘lov usuli</th><th className={TH_}>Kim kiritdi</th><th className={cx(TH_, 'text-right')}>Summa</th></>}
+                  {open === 'xar' && <><th className={TH_}>Vaqt</th><th className={TH_}>Nima uchun / kimga</th><th className={TH_}>To‘lov usuli</th><th className={TH_}>Kim kiritdi</th><th className={cx(TH_, 'text-right')}>Summa</th></>}
+                </tr></thead>
+                <tbody>
+                  {open === 'ish' && x.work.map((w) => { const debt = Math.max(0, w.work - w.paid); return (
+                    <tr key={w.patient_id} className="border-t border-line"><td className="px-3 py-2 font-medium">{w.who}</td><td className="px-3 py-2 whitespace-nowrap text-[#3d4858]">{w.doc ?? '—'}</td>
+                      <td className={cx(NUM, 'font-semibold')}>{som(w.work)}</td><td className={cx(NUM, 'text-ok')}>{som(w.paid)}</td>
+                      <td className={cx(NUM, debt ? 'font-semibold text-warn' : 'text-sub')}>{debt ? som(debt) : '—'}</td></tr>); })}
+                  {open === 'pul' && (x.income).map((m) => (
+                    <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{hm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who ?? '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-[#3d4858]">{m.doc ?? '—'}</td><td className="px-3 py-2 text-[#3d4858]">{m.box}</td><td className="px-3 py-2 text-sub">{m.by_name ?? '—'}</td>
+                      <td className={cx(NUM, 'font-semibold', m.kind === 'refund' ? 'text-[#b91c1c]' : 'text-ok')}>{m.kind === 'refund' ? '−' : ''}{som(m.amount)}</td></tr>))}
+                  {open === 'xar' && x.expense.map((m) => (
+                    <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{hm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who || '—'}</td>
+                      <td className="px-3 py-2 text-[#3d4858]">{m.box}</td><td className="px-3 py-2 text-sub">{m.by_name ?? '—'}</td><td className={cx(NUM, 'font-semibold text-[#b91c1c]')}>{som(m.amount)}</td></tr>))}
+                  {((open === 'ish' && !x.work.length) || (open === 'pul' && !x.income.length) || (open === 'xar' && !x.expense.length)) && <tr><td colSpan={6} className="p-6 text-center text-sub">Bugun yozuv yo‘q</td></tr>}
+                  <tr className="border-t-2 border-line bg-muted/50 font-bold">
+                    {open === 'ish' && <><td className="px-3 py-2" colSpan={2}>Jami</td><td className={NUM}>{som(d.work_done)}</td><td className={cx(NUM, 'text-ok')}>{som(x.work.reduce((a, w) => a + w.paid, 0))}</td><td className={cx(NUM, 'text-warn')}>{som(x.work.reduce((a, w) => a + Math.max(0, w.work - w.paid), 0))}</td></>}
+                    {open === 'pul' && <><td className="px-3 py-2" colSpan={5}>Jami</td><td className={cx(NUM, 'text-ok')}>{som(d.income)}</td></>}
+                    {open === 'xar' && <><td className="px-3 py-2" colSpan={4}>Jami</td><td className={cx(NUM, 'text-[#b91c1c]')}>{som(d.expense)}</td></>}
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
+      )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {d.cashboxes.map((b) => {
           const Ic = METHOD_ICON[b.method] ?? Banknote;
@@ -124,8 +190,56 @@ function Boxes() {
           );
         })}
       </div>
+      <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]">
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3.5">
+          <Stethoscope size={18} className="text-primary" />
+          <h3 className="m-0 flex-1 text-base font-semibold">Bugun — shifokorlar qancha topdi</h3>
+          <span className="text-[13px] text-sub">Jami: <b className="text-fg">{som(allIn)}</b></span>
+        </div>
+        {docs.length === 0 && <div className="p-6 text-center text-sm text-sub">Bugun to‘lov yo‘q</div>}
+        {docs.map((g, i) => {
+          const p = allIn ? Math.round((g.sum * 100) / allIn) : 0, on = doc === g.key;
+          return (
+            <div key={g.key} className={cx(i > 0 && 'border-t border-line', on && 'bg-[#f3fafd]')}>
+              <button type="button" onClick={() => setDoc(on ? null : g.key)} aria-expanded={on} className="flex w-full flex-wrap items-center gap-3 px-4 py-3.5 text-left">
+                <ChevronRight size={16} className={cx('flex-none transition-transform', on && 'rotate-90')} />
+                <span className="flex min-w-[160px] flex-1 flex-col gap-0.5"><span className="text-[15px] font-semibold">{g.name}</span><span className="text-xs text-sub">{g.patients} ta bemor · {p}%</span></span>
+                <span className="h-1.5 w-[140px] overflow-hidden rounded-full bg-[#eef3f6]"><span className="block h-full rounded-full bg-primary" style={{ width: `${p}%` }} /></span>
+                <span className="min-w-[130px] text-right text-base font-bold whitespace-nowrap tabular-nums">{som(g.sum)}</span>
+                <span className="flex min-w-[150px] flex-col items-end gap-0.5 rounded-[10px] bg-[#f3effe] px-2.5 py-1.5 whitespace-nowrap tabular-nums">
+                  <span className="text-[11px] text-[#5b21b6]">Shifokorga {pct}%</span><b className="text-sm text-[#5b21b6]">{som(Math.round((g.sum * pct) / 100))}</b>
+                </span>
+              </button>
+              {on && (
+                <div className="overflow-x-auto px-4 pb-3.5 pl-11">
+                  <table className="w-full overflow-hidden rounded-[10px] border border-line bg-white text-sm">
+                    <thead className="bg-muted/70"><tr className="text-left text-xs text-sub uppercase"><th className={TH_}>Vaqt</th><th className={TH_}>Bemor</th><th className={TH_}>To‘lov</th><th className={cx(TH_, 'text-right')}>Topgani</th><th className={cx(TH_, 'text-right')}>Shifokorga {pct}%</th></tr></thead>
+                    <tbody>{g.rows.map((m) => (
+                      <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{hm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who ?? '—'}</td><td className="px-3 py-2 text-[#3d4858]">{m.box}</td>
+                        <td className={cx(NUM, 'font-semibold text-ok')}>{som(m.amount)}</td><td className={cx(NUM, 'font-semibold text-[#5b21b6]')}>{som(Math.round((m.amount * pct) / 100))}</td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </section>
     </div>
   );
+}
+
+/** Tushumni shifokorlar bo'yicha guruhlash (to'lovdagi shifokor, bo'lmasa akt shifokori). */
+function useDocs(rows: Details['income']) {
+  return useMemo(() => {
+    const m = new Map<string, { key: string; name: string; sum: number; pats: Set<string>; rows: Details['income'] }>();
+    for (const r of rows) {
+      const key = r.doctor_id ?? '-';
+      const g = m.get(key) ?? { key, name: r.doc ?? 'Shifokor ko‘rsatilmagan', sum: 0, pats: new Set<string>(), rows: [] };
+      g.sum += r.amount; if (r.who) g.pats.add(r.who); g.rows.push(r); m.set(key, g);
+    }
+    return [...m.values()].map((g) => ({ ...g, patients: g.pats.size })).sort((a, b) => b.sum - a.sum);
+  }, [rows]);
 }
 
 function Operations({ period }: { period: Period }) {

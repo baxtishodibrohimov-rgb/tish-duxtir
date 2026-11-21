@@ -49,7 +49,7 @@ const R: Record<string, Resource> = {
   staff_shifts: { table: 'staff_shifts', scope: 'branch', read: 'schedule.view', write: 'schedule.edit',
     columns: ['branch_id', 'member_id', 'room_id', 'shift_date', 'starts_at', 'ends_at'], filters: ['branch_id', 'member_id', 'shift_date'], order: 'shift_date, starts_at' },
   price_categories: { table: 'price_categories', scope: 'org', read: null, write: 'settings.edit',
-    columns: ['name', 'color_idx', 'position'], order: 'position, name' },
+    columns: ['name', 'color_idx', 'position', 'icon'], order: 'position, name' },
   price_items: { table: 'price_items', scope: 'org', read: null, write: 'settings.edit',
     columns: ['category_id', 'name', 'code', 'price', 'position', 'archived'], filters: ['category_id', 'archived'],
     search: ['name', 'code'], order: 'position, name' },

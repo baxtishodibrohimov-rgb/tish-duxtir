@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell, Sparkles, X } from 'lucide-react';
+import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell, Sparkles, X, ChevronDown, Plus } from 'lucide-react';
 import { Link, navigate, useLocation } from '@/lib/router';
 import { useAuth, ROLE_LABEL } from '@/lib/auth';
 import { db } from '@/lib/api';
@@ -17,6 +17,7 @@ const NAV: { label: string; to: string; icon: typeof Users; perm: Perm | null }[
   { label: 'Sozlamalar', to: '/settings', icon: Settings, perm: null },
 ];
 
+const BR_DOTS = ['#00a1db', '#15803d', '#d97706', '#7c3aed', '#db2777', '#0f766e'];
 export const AUDIENCE: Record<Reminder['audience'], string> = { me: 'Men', admins: 'Administratorlar', owners: 'Rahbarlar' };
 
 function useOutside(open: boolean, close: () => void) {
@@ -38,7 +39,10 @@ const Count = ({ n, tone }: { n: number; tone: string }) => n > 0
 
 export function Header() {
   const { path } = useLocation();
-  const { user, me, org, branches, branch, setBranch, can, signOut } = useAuth();
+  const { user, me, org, branches, branch, setBranch, can, signOut, refresh } = useAuth();
+  const [adding, setAdding] = useState<string | null>(null);
+  const addBranch = useAction((name: string) => db.insert<{ id: string }>('branches', { name, position: branches.length }),
+    { success: 'Filial qo‘shildi', onDone: async (b) => { setAdding(null); setBrMenu(false); await refresh(); setBranch(b.id); } });
   const [menu, setMenu] = useState(false);
   const [brMenu, setBrMenu] = useState(false);
   const [quick, setQuick] = useState<'queue' | 'reminders' | null>(null);
@@ -51,28 +55,49 @@ export function Header() {
     <header className="sticky top-0 z-40 border-b border-line bg-white">
       <div className="flex min-h-11 flex-wrap items-center gap-x-2.5 gap-y-1 px-4">
         <div ref={brRef} className="relative">
-          <button type="button" onClick={() => setBrMenu(!brMenu)} aria-haspopup="menu" aria-expanded={brMenu} aria-label="Klinika profili"
-            title={`${org?.name ?? ''} · ${branch?.name ?? ''}`}
-            className="flex h-[30px] items-center gap-1.5 rounded-full pr-2 hover:bg-muted">
-            <span className="grid h-[30px] w-[30px] place-items-center">
-              <span className="grid h-6 w-6 place-items-center rounded-full bg-primary-soft">
-                <Building2 size={15} className="text-primary" />
-              </span>
-            </span>
-            {branches.length > 1 && <span className="max-w-[140px] truncate text-[13px] font-medium text-sub">{branch?.name}</span>}
+          <button type="button" onClick={() => { setBrMenu(!brMenu); setAdding(null); }} aria-haspopup="menu" aria-expanded={brMenu} aria-label="Filialni tanlash" title="Filialni tanlash"
+            className={cx('flex h-8 items-center gap-1.5 rounded-full pr-2 pl-[3px]', brMenu ? 'bg-[#e6f6fc]' : 'hover:bg-muted')}>
+            <span className="grid h-[26px] w-[26px] place-items-center rounded-full bg-primary-soft"><Building2 size={15} className="text-primary" /></span>
+            <span className="max-w-[150px] truncate text-[13px] font-semibold">{branch?.name}</span>
+            <ChevronDown size={14} className="text-sub" />
           </button>
           {brMenu && (
-            <div role="menu" className="absolute top-9 left-0 z-50 w-60 rounded-xl border border-line bg-white p-1.5 shadow-pop">
-              <div className="border-b border-line px-2.5 pt-1.5 pb-2 text-sm font-semibold">{org?.name}</div>
-              <div className="px-2.5 pt-2 pb-1 text-xs text-sub">Filial</div>
-              {branches.map((b) => (
-                <button key={b.id} role="menuitemradio" aria-checked={b.id === branch?.id}
-                  onClick={() => { setBranch(b.id); setBrMenu(false); }}
-                  className="flex h-9 w-full items-center justify-between rounded-lg px-2.5 text-left text-sm hover:bg-muted">
-                  {b.name}
-                  {b.id === branch?.id && <Check size={16} className="text-primary" />}
-                </button>
-              ))}
+            <div role="menu" aria-label="Filiallar" className="absolute top-10 left-0 z-[300] w-[300px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-line bg-white shadow-[0_16px_40px_-12px_rgba(7,18,30,.3)]">
+              <div className="flex flex-col gap-0.5 border-b border-line bg-surface px-4 pt-3.5 pb-3">
+                <span className="text-xs text-sub">{org?.name} · joriy filial</span>
+                <span className="text-[17px] font-bold">{branch?.name}</span>
+              </div>
+              <div className="flex flex-col p-1.5">
+                {branches.map((b, i) => {
+                  const on = b.id === branch?.id;
+                  return (
+                    <button key={b.id} type="button" role="menuitemradio" aria-checked={on} onClick={() => { setBranch(b.id); setBrMenu(false); }}
+                      className={cx('flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm', on ? 'bg-[#e6f6fc] font-semibold' : 'hover:bg-muted')}>
+                      <span className="h-2.5 w-2.5 flex-none rounded-full" style={{ background: BR_DOTS[i % BR_DOTS.length] }} />
+                      <span className="flex-1 truncate">{b.name}</span>
+                      {on && <Check size={16} className="text-primary" />}
+                    </button>
+                  );
+                })}
+              </div>
+              {can('settings.edit') && (
+                <div className="border-t border-line px-2.5 pt-2 pb-2.5">
+                  {adding !== null ? (
+                    <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); if (adding.trim()) addBranch.mutate(adding.trim()); }}>
+                      <label htmlFor="brNew" className="text-xs text-sub">Yangi filial nomi</label>
+                      <input id="brNew" autoFocus placeholder="Masalan: Chilonzor" value={adding} onChange={(e) => setAdding(e.target.value)} className="h-9 rounded-lg border border-line px-2.5 text-sm" />
+                      <div className="flex gap-1.5">
+                        <button type="submit" disabled={!adding.trim() || addBranch.isPending} className="h-9 flex-1 rounded-lg bg-primary text-sm font-medium text-white">Qo‘shish</button>
+                        <button type="button" onClick={() => setAdding(null)} className="h-9 rounded-lg border border-line px-3 text-sm text-sub">Bekor</button>
+                      </div>
+                    </form>
+                  ) : (
+                    <button type="button" onClick={() => setAdding('')} className="flex h-[38px] w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary bg-[#f2fbff] text-sm font-semibold text-primary-hover">
+                      <Plus size={16} /> Filial qo‘shish
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

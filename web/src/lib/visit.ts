@@ -21,3 +21,6 @@ export const MOODS: [string, string][] = [
 ];
 
 export const WD_LOWER = ['yakshanba', 'dushanba', 'seshanba', 'chorshanba', 'payshanba', 'juma', 'shanba'];
+
+/** Bemor belgisi uchun to'liq to'plam (qabul oynasidagi belgilar panjarasi). */
+export const MOOD_GRID: string[] = ["🙂", "😀", "😁", "😊", "😐", "😕", "😢", "😡", "😷", "🤒", "😎", "🤔", "😴", "😬", "🥰", "😇", "🦷", "👄", "👅", "💉", "💊", "🩺", "🩹", "🩻", "🔬", "🪥", "🧪", "✂️", "🔧", "🔨", "👶", "🧒", "👦", "👧", "👨", "👩", "👴", "👵", "👨‍👩‍👧", "🤰", "❤️", "💔", "⭐", "👑", "💎", "💰", "💳", "💵", "🎁", "🎂", "🍎", "🍏", "☕", "🔔", "⚠️", "❗", "❓", "⛔", "✅", "🔑", "🔒", "🔗", "📷", "📞", "📝", "📋", "📅", "⏰", "🌐", "💬", "💭", "💡", "🌈", "☂️", "🌻", "🏁", "⚙️", "🚗", "🅿️", "✈️", "🎓", "🏆", "🔥", "⚡"];

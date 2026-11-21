@@ -1,25 +1,27 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Menu, Palette, Pencil, Plus, Trash2, User, Users, Tag, ListOrdered, Building2, CalendarDays, Banknote, BookOpen } from 'lucide-react';
+import { CAT_ICONS, CatIconSvg } from '@/components/WorksWizard';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOrg, ROLE_LABEL, ALL_PERMS, roleDefault } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
-import { dmy, hm, initials, isoDate, phoneFmt } from '@/lib/format';
+import { dmy, hm, initials, isoDate, phoneFmt, qty as fq } from '@/lib/format';
 import { useQueryParam, useTitle } from '@/lib/router';
-import type { Branch, Member, PatientStatus, Perm, PriceCategory, PriceItem, Role, Room } from '@/lib/types';
+import type { Branch, CalcCard, CatIcon, Member, PatientStatus, Perm, PriceCategory, PriceItem, Product, Role, Room } from '@/lib/types';
 import { Badge, Button, Card, Confirm, Empty, Field, Input, Modal, Select, Switch, Toggle, cx } from '@/components/ui';
 
-type Tab = 'profile' | 'clinic' | 'staff' | 'schedule' | 'price' | 'salary' | 'statuses' | 'dicts';
+type Tab = 'profile' | 'clinic' | 'staff' | 'schedule' | 'price' | 'works' | 'salary' | 'statuses' | 'dicts';
 
 export function Settings() {
   useTitle('Sozlamalar');
   const { can } = useOrg();
-  const tabs: { key: Tab; label: string; icon: typeof User; show: boolean }[] = [
+  const tabs: { key: Tab; label: string; icon: (p: { size?: number }) => React.ReactNode; show: boolean }[] = [
     { key: 'profile', label: 'Mening profilim', icon: User, show: true },
     { key: 'clinic', label: 'Klinika', icon: Building2, show: can('settings.edit') },
     { key: 'staff', label: 'Xodimlar va ruxsatlar', icon: Users, show: can('staff.manage') },
     { key: 'schedule', label: 'Jadval', icon: CalendarDays, show: can('settings.edit') || can('schedule.edit') },
     { key: 'price', label: 'Prays', icon: ListOrdered, show: can('settings.edit') },
+    { key: 'works', label: 'Bajarilgan ish', icon: ToothIcon, show: can('settings.edit') || can('warehouse.admin') },
     { key: 'salary', label: 'Maosh', icon: Banknote, show: can('staff.manage') },
     { key: 'statuses', label: 'Bemor statuslari', icon: Tag, show: can('settings.edit') },
     { key: 'dicts', label: 'Ma’lumotnomalar', icon: BookOpen, show: can('settings.edit') || can('cashbox.edit') },
@@ -44,6 +46,7 @@ export function Settings() {
       {cur === 'staff' && <Staff />}
       {cur === 'schedule' && <ScheduleTab />}
       {cur === 'price' && <Price />}
+      {cur === 'works' && <Works />}
       {cur === 'salary' && <Salary />}
       {cur === 'statuses' && <Statuses />}
       {cur === 'dicts' && <Dicts />}
@@ -69,6 +72,9 @@ function Item({ label, hint, children }: { label: string; hint?: string; childre
   );
 }
 const SIN = 'h-8 w-[220px] max-w-full rounded-lg border border-line bg-white px-2.5 text-[15px]';
+
+/** Sozlamalar menyusi uchun tish belgisi (lucide'da yo'q). */
+function ToothIcon({ size = 16 }: { size?: number }) { return <CatIconSvg icon="tooth" size={size} />; }
 
 // ---------------- Profil ----------------
 function Profile() {
@@ -201,13 +207,137 @@ function ScheduleTab() {
 
 // ---------------- Maosh ----------------
 function Salary() {
+  const { org, refresh } = useOrg();
+  const [pct, setPct] = useState(String(org.doctor_share_percent ?? 30));
+  const save = useAction(() => http.patch('/api/org', { doctor_share_percent: Math.min(100, Math.max(0, Number(pct) || 0)) }), { success: 'Saqlandi', onDone: () => { void refresh(); } });
   return (
-    <Group title="Xodimlar maoshi">
-      <div className="py-6 text-sm text-sub">
-        Ish haqi hisoblash (stavkalar va bajarilgan ishlar bo‘yicha foiz) hali qo‘shilmagan. Hozircha xodimga berilgan pulni
-        Kassa → «Xarajat» orqali, kontragent sifatida xodimni tanlab kiritish mumkin.
+    <div className="flex flex-col gap-4">
+      <Group title="Xodimlar maoshi">
+        <Item label="Shifokor ulushi, %" hint="Kassa → «Bugun — shifokorlar qancha topdi» shu foiz bilan hisoblanadi">
+          <span className="flex items-center gap-2">
+            <input type="number" min={0} max={100} aria-label="Shifokor ulushi" className={cx(SIN, '!w-24 text-right')} value={pct} onChange={(e) => setPct(e.target.value)} />
+            <Button size="sm" variant="primary" loading={save.isPending} onClick={() => save.mutate(undefined)}>Saqlash</Button>
+          </span>
+        </Item>
+        <div className="py-3 text-sm text-sub">
+          To‘liq ish haqi hisoblash (stavkalar, ishlar bo‘yicha alohida foiz, berish jurnali) hali qo‘shilmagan. Xodimga berilgan pulni
+          Kassa → «Xarajat» orqali kiritish mumkin.
+        </div>
+      </Group>
+    </div>
+  );
+}
+
+// ---------------- Bajarilgan ish: kategoriya → ish → kerakli materiallar ----------------
+function Works() {
+  const cats = useList<PriceCategory>('price_categories');
+  const items = useList<PriceItem>('price_items', { archived: false });
+  const cards = useList<CalcCard>('calc_cards');
+  const products = useList<Product>('products', { archived: false });
+  const [catId, setCatId] = useState<string | null>(null);
+  const [workId, setWorkId] = useState<string | null>(null);
+  const [nc, setNc] = useState('');
+  const [nw, setNw] = useState('');
+  const cat = cats.data?.find((c) => c.id === catId) ?? cats.data?.[0];
+  const works = (items.data ?? []).filter((i) => i.category_id === cat?.id);
+  const work = works.find((w) => w.id === workId) ?? works[0];
+  const mats = (cards.data ?? []).filter((c) => c.price_item_id === work?.id);
+  const pm = byId(products.data);
+  const addCat = useAction(() => db.insert<PriceCategory>('price_categories', { name: nc.trim(), position: cats.data?.length ?? 0, color_idx: (cats.data?.length ?? 0) % 6 }),
+    { invalidate: ['price_categories'], onDone: (c) => { setNc(''); setCatId(c.id); setWorkId(null); } });
+  const setIcon = useAction(({ id, icon }: { id: string; icon: CatIcon }) => db.update('price_categories', id, { icon }), { invalidate: ['price_categories'] });
+  const delCat = useAction((id: string) => db.remove('price_categories', id), { invalidate: ['price_categories', 'price_items'], onDone: () => setCatId(null) });
+  const addWork = useAction(() => db.insert<PriceItem>('price_items', { category_id: cat!.id, name: nw.trim(), price: 0, position: works.length }),
+    { invalidate: ['price_items'], onDone: (w) => { setNw(''); setWorkId(w.id); } });
+  const delWork = useAction((id: string) => db.update('price_items', id, { archived: true }), { invalidate: ['price_items'] });
+  const addMat = useAction((pid: string) => db.insert('calc_cards', { price_item_id: work!.id, product_id: pid, qty: 1 }), { invalidate: ['calc_cards'] });
+  const setQty = useAction(({ id, qty }: { id: string; qty: number }) => db.update('calc_cards', id, { qty }), { invalidate: ['calc_cards'] });
+  const delMat = useAction((id: string) => db.remove('calc_cards', id), { invalidate: ['calc_cards'] });
+  const row = (on: boolean) => cx('flex items-center gap-1 rounded-lg', on ? 'bg-[#e6f6fc] font-semibold text-primary-hover' : 'text-fg');
+  const H = 'px-1.5 pb-1.5 text-xs font-semibold tracking-[.04em] text-sub uppercase';
+  const IN = 'h-9 min-w-0 flex-1 rounded-md border border-line px-2.5 text-sm';
+  const PLUS = 'h-9 w-9 flex-none rounded-md bg-primary text-xl text-white disabled:opacity-50';
+  return (
+    <div className="flex max-w-[1380px] flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <h2 className="m-0 text-lg font-semibold">Bajarilgan ish</h2>
+        <span className="text-sm text-sub">Kategoriya va ishlarni kiriting, har bir ishga ombordagi kerakli materiallar va odatdagi miqdorini biriktiring. Shifokor jadvalda «Bajarilgan ish»ni ochganda shu ro‘yxat chiqadi. Ishlar Praysdagi xizmatlar bilan bir xil — narxi Prays bo‘limida.</span>
       </div>
-    </Group>
+      <div className="flex flex-wrap overflow-hidden rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04)]">
+        <section aria-label="Kategoriyalar" className="flex flex-[1_1_220px] flex-col gap-1 border-r border-line p-3.5">
+          <span className={H}>Kategoriyalar</span>
+          {(cats.data ?? []).map((c) => (
+            <div key={c.id} className={row(c.id === cat?.id)}>
+              <button type="button" onClick={() => { setCatId(c.id); setWorkId(null); }} className="flex min-h-10 flex-1 items-center gap-2 px-2.5 text-left text-sm">
+                <CatIconSvg icon={c.icon} size={16} />{c.name} <span className="text-xs font-normal text-sub">· {(items.data ?? []).filter((i) => i.category_id === c.id).length}</span>
+              </button>
+              <button type="button" onClick={() => delCat.mutate(c.id)} aria-label="Kategoriyani o‘chirish" title="O‘chirish" className="grid h-8 w-8 place-items-center rounded-md text-faint hover:text-bad"><Trash2 size={15} /></button>
+            </div>
+          ))}
+          <form className="mt-1.5 flex gap-1.5" onSubmit={(e) => { e.preventDefault(); if (nc.trim()) addCat.mutate(undefined); }}>
+            <label htmlFor="wsNc" className="sr-only">Yangi kategoriya</label>
+            <input id="wsNc" placeholder="Yangi kategoriya" value={nc} onChange={(e) => setNc(e.target.value)} className={IN} />
+            <button type="submit" aria-label="Kategoriya qo‘shish" disabled={!nc.trim()} className={PLUS}>+</button>
+          </form>
+          {cat && (
+            <div className="mt-2 flex flex-wrap gap-1" role="radiogroup" aria-label="Kategoriya belgisi">
+              {CAT_ICONS.map((i) => (
+                <button key={i.key} type="button" role="radio" aria-checked={cat.icon === i.key} title={i.label} onClick={() => setIcon.mutate({ id: cat.id, icon: i.key })}
+                  className={cx('grid h-8 w-8 place-items-center rounded-md', cat.icon === i.key ? 'bg-primary text-white' : 'bg-muted text-sub')}><CatIconSvg icon={i.key} size={16} /></button>
+              ))}
+            </div>
+          )}
+        </section>
+        <section aria-label="Ishlar" className="flex flex-[1_1_280px] flex-col gap-1 border-r border-line p-3.5">
+          <span className={H}>{cat?.name ?? ''} — ishlar</span>
+          {works.map((w) => (
+            <div key={w.id} className={row(w.id === work?.id)}>
+              <button type="button" onClick={() => setWorkId(w.id)} className="flex min-h-11 flex-1 flex-col justify-center px-2.5 py-1 text-left">
+                <span className="text-sm">{w.name || 'Nomsiz'}</span>
+                <span className="text-xs font-normal text-sub">{(cards.data ?? []).filter((c) => c.price_item_id === w.id).length} ta material</span>
+              </button>
+              <button type="button" onClick={() => delWork.mutate(w.id)} aria-label="Ishni o‘chirish" title="O‘chirish" className="grid h-8 w-8 place-items-center rounded-md text-faint hover:text-bad"><Trash2 size={15} /></button>
+            </div>
+          ))}
+          {cat && (
+            <form className="mt-1.5 flex gap-1.5" onSubmit={(e) => { e.preventDefault(); if (nw.trim()) addWork.mutate(undefined); }}>
+              <label htmlFor="wsNw" className="sr-only">Yangi ish</label>
+              <input id="wsNw" placeholder="Yangi ish nomi" value={nw} onChange={(e) => setNw(e.target.value)} className={IN} />
+              <button type="submit" aria-label="Ish qo‘shish" disabled={!nw.trim()} className={PLUS}>+</button>
+            </form>
+          )}
+        </section>
+        <section aria-label="Materiallar" className="flex flex-[2_1_380px] flex-col gap-2 px-[18px] py-3.5">
+          <span className="text-xs font-semibold tracking-[.04em] text-sub uppercase">{work?.name ?? 'Ish'} — kerakli materiallar</span>
+          {!work ? <span className="py-6 text-sm text-sub">Avval ish qo‘shing yoki tanlang.</span> : <>
+            <div className="flex flex-col overflow-hidden rounded-[10px] border border-line">
+              {mats.length === 0 && <span className="p-4 text-sm text-sub">Bu ishga hali material biriktirilmagan.</span>}
+              {mats.map((m) => {
+                const p = pm.get(m.product_id);
+                return (
+                  <div key={m.id} className="flex flex-wrap items-center gap-2.5 border-t border-muted py-1.5 pr-2 pl-3.5 first:border-t-0">
+                    <span className="flex-[1_1_160px] text-sm">{p?.name ?? '—'}</span>
+                    <span className="inline-flex items-center overflow-hidden rounded-lg border border-line">
+                      <button type="button" onClick={() => setQty.mutate({ id: m.id, qty: Math.max(m.qty % 1 ? m.qty / 2 : 1, m.qty - 1) })} aria-label="Kamaytirish" className="h-9 w-9 bg-surface text-lg">−</button>
+                      <span className="min-w-20 text-center font-semibold tabular-nums">{fq(m.qty)} {p?.unit}</span>
+                      <button type="button" onClick={() => setQty.mutate({ id: m.id, qty: m.qty + 1 })} aria-label="Ko‘paytirish" className="h-9 w-9 bg-surface text-lg">+</button>
+                    </span>
+                    <button type="button" onClick={() => delMat.mutate(m.id)} aria-label="Materialni o‘chirish" title="O‘chirish" className="grid h-9 w-9 place-items-center rounded-md text-[#b91c1c]"><Trash2 size={16} /></button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="wsAdd" className="text-[13px] text-sub">Material qo‘shish:</label>
+              <select id="wsAdd" value="" onChange={(e) => e.target.value && addMat.mutate(e.target.value)} className="h-9 max-w-[340px] flex-1 rounded-md border border-line bg-white px-2 text-sm">
+                <option value="">Ombordan tanlang…</option>
+                {(products.data ?? []).filter((p) => !mats.some((m) => m.product_id === p.id)).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}
+              </select>
+            </div>
+          </>}
+        </section>
+      </div>
+    </div>
   );
 }
 

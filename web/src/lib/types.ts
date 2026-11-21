@@ -11,7 +11,7 @@ export interface User { id: string; full_name: string; email: string | null; pho
 
 export interface Org {
   id: string; name: string; logo_url: string | null; currency: string; timezone: string;
-  stock_mode: 'simple' | 'mid' | 'exact'; allow_negative_stock: boolean; telegram_chat_id: string | null;
+  stock_mode: 'simple' | 'mid' | 'exact'; allow_negative_stock: boolean; telegram_chat_id: string | null; doctor_share_percent: number;
 }
 
 export interface Branch {
@@ -47,7 +47,8 @@ export interface Visit {
 }
 export interface VisitItem { id: string; visit_id: string; price_item_id: string | null; name: string; price: number }
 
-export interface PriceCategory { id: string; org_id: string; name: string; color_idx: number; position: number }
+export type CatIcon = 'cons' | 'tooth' | 'hyg' | 'crown' | 'braces' | 'surg';
+export interface PriceCategory { id: string; org_id: string; name: string; color_idx: number; position: number; icon: CatIcon }
 export interface PriceItem {
   id: string; org_id: string; category_id: string; name: string; code: string | null; price: number;
   position: number; archived: boolean;

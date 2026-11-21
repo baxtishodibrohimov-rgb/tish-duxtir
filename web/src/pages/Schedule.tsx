@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState, type MouseEvent as RMouseEvent } from 'react';
-import { ChevronLeft, ChevronRight, Settings as Gear, Stethoscope, Users, UserCog, Printer, SlidersHorizontal, CalendarDays } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
+import { ChevronLeft, ChevronRight, Settings as Gear, Stethoscope, Users, UserCog, Printer, SlidersHorizontal, CalendarDays, AlertTriangle } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { useAction, useList, byId } from '@/lib/hooks';
 import { db, http } from '@/lib/api';
 import { addDays, ageOf, dmy, hm, initials, isoDate, money, pad, phoneShow, sameDay } from '@/lib/format';
 import { Link, navigate, useLocation, useTitle } from '@/lib/router';
-import { DEAD_STATUS, MOODS, VISIT_STATUS, WD_LOWER } from '@/lib/visit';
+import { DEAD_STATUS, MOOD_GRID, VISIT_STATUS, WD_LOWER } from '@/lib/visit';
+import { CatIconSvg, WorksWizard } from '@/components/WorksWizard';
 import type { Act, Cashbox, Member, Patient, PriceItem, Room, Visit, VisitStatus, WaitItem } from '@/lib/types';
 import { MiniCalendar } from '@/components/MiniCalendar';
 import { VisitModal, balanceInfo, usePatientBalances, useClickAway, type VisitInit } from '@/components/VisitModal';
@@ -43,8 +44,20 @@ const dayLabel = (d: Date) => `${WD_LOWER[d.getDay()]}, ${d.getDate()}-${['yanva
 
 export function Schedule() {
   useTitle('Jadval');
-  const { branch, members, can } = useOrg();
+  const { branch: ownBranch, branches, members, can } = useOrg();
   const { search } = useLocation();
+  // Boshqa filial jadvalini faqat ko'rish rejimi
+  const [viewBr, setViewBr] = useState<string | null>(null);
+  const roBranch = viewBr ? branches.find((b) => b.id === viewBr && b.id !== ownBranch.id) ?? null : null;
+  const RO = !!roBranch;
+  const branch = roBranch ?? ownBranch;
+  const [roWarn, setRoWarn] = useState(false);
+  const roBlock = (e?: { stopPropagation?: () => void; preventDefault?: () => void }) => { if (!RO) return false; e?.stopPropagation?.(); e?.preventDefault?.(); setRoWarn(true); setPop(null); return true; };
+  const drag = useRef<{ id: string; gy: number } | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const [rz, setRz] = useState<{ id: string; end: number } | null>(null);
+  const [works, setWorks] = useState<Visit | null>(null);
   const [start, setStart] = useState(() => new Date());
   const [view, setViewState] = useState<View>(() => readView(branch.days_visible));
   const setView = (v: View) => { setViewState(v); try { localStorage.setItem(VKEY, JSON.stringify(v)); } catch { /* */ } };
@@ -93,7 +106,7 @@ export function Schedule() {
   const fitPx = Math.max(20, (window.innerHeight - 140) / slots.length);
   const slotH = view.scale === 'fit' ? fitPx : PX30;
   const px = (min: number) => ((min - startMin) / 30) * slotH;
-  const canEdit = can('schedule.edit', branch.id);
+  const canEdit = !RO && can('schedule.edit', branch.id);
   const effDoc = view.only && view.doc ? view.doc : '';
   const showVisits = view.tab === 'doctor';
 
@@ -109,6 +122,24 @@ export function Schedule() {
     return db.insert('time_reservations', { branch_id: branch.id, room_id: room, starts_at: st.toISOString(), ends_at: new Date(+st + 3600_000).toISOString(), reason: 'Band' });
   }, { invalidate: ['time_reservations'], success: 'Vaqt band qilindi', onDone: () => setCtx(null) });
   const ctxRef = useClickAway(!!ctx, () => setCtx(null));
+  const move = useAction(({ v, date, min, room }: { v: Visit; date: Date; min: number; room: string | null }) => {
+    const dur = +new Date(v.ends_at) - +new Date(v.starts_at);
+    const st = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, min);
+    return db.update('visits', v.id, { starts_at: st.toISOString(), ends_at: new Date(+st + dur).toISOString(), room_id: room });
+  }, { invalidate: ['visits'], success: 'Qabul ko‘chirildi' });
+  const stretch = useAction(({ v, end }: { v: Visit; end: number }) => {
+    const s0 = new Date(v.starts_at);
+    return db.update('visits', v.id, { ends_at: new Date(s0.getFullYear(), s0.getMonth(), s0.getDate(), 0, end).toISOString() });
+  }, { invalidate: ['visits'], onDone: () => setRz(null) });
+  const startResize = (e: React.PointerEvent, v: Visit) => {
+    e.stopPropagation(); e.preventDefault();
+    if (roBlock(e) || !canEdit) return;
+    const y0 = e.clientY, end0 = minOf(v.ends_at), from0 = minOf(v.starts_at);
+    let cur = end0;
+    const mv = (ev: PointerEvent) => { cur = Math.max(from0 + 15, Math.min(endMin, end0 + Math.round(((ev.clientY - y0) / slotH) * 30 / 15) * 15)); setRz({ id: v.id, end: cur }); };
+    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); if (cur !== end0) stretch.mutate({ v, end: cur }); else setRz(null); };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  };
 
   return (
     <div className="relative flex flex-col" onClick={() => pop && setPop(null)}>
@@ -133,6 +164,7 @@ export function Schedule() {
               {days.map((d, i) => (
                 <div key={i} className="min-w-0 flex-1 border-r-2 border-[#c9d2d9] last:border-r-0">
                   <div className="flex items-center">
+                    {i === 0 && RO && <span title="Boshqa filial jadvali — faqat ko‘rish" className="max-w-[45%] flex-none truncate px-2.5 text-xs font-bold text-[#dc2626]">{roBranch!.name}</span>}
                     {i === 0 && <>
                       <button type="button" aria-label="Oldingi kun" onClick={() => setStart(addDays(start, -1))} className="ml-1 grid h-[30px] w-[26px] flex-none place-items-center rounded-md hover:bg-[#e6edf2]"><ChevronLeft size={16} /></button>
                       <button type="button" aria-label="Keyingi kun" onClick={() => setStart(addDays(start, 1))} className="grid h-[30px] w-[26px] flex-none place-items-center rounded-md hover:bg-[#e6edf2]"><ChevronRight size={16} /></button>
@@ -176,37 +208,53 @@ export function Schedule() {
                         <div key={ci} className="relative min-w-0 flex-1 border-r border-[rgba(223,230,235,.6)] last:border-r-0"
                           title={showVisits && canEdit ? 'Bo‘sh joyni bosing — yangi qabul. O‘ng tugma — menyu' : undefined}
                           style={{ height: slots.length * slotH, backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${slotH - 1}px, rgba(223,230,235,.6) ${slotH - 1}px, rgba(223,230,235,.6) ${slotH}px)` }}
+                          onDragOver={(e) => { if (!drag.current) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; const k = `${di}-${ci}`; if (over !== k) setOver(k); }}
+                          onDragLeave={(e) => { if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget as Node)) return; if (over === `${di}-${ci}`) setOver(null); }}
+                          onDrop={(e) => {
+                            e.preventDefault(); const dg = drag.current; drag.current = null; setDragId(null); setOver(null);
+                            const v = (visits.data ?? []).find((x) => x.id === dg?.id); if (!v || !dg) return;
+                            const dur = minOf(v.ends_at) - minOf(v.starts_at);
+                            const y = e.clientY - e.currentTarget.getBoundingClientRect().top - dg.gy;
+                            const min = Math.max(startMin, Math.min(endMin - dur, startMin + Math.round((y / slotH) * 30 / 15) * 15));
+                            move.mutate({ v, date: d, min, room: rid });
+                          }}
                           onClick={(e) => {
                             if (e.target !== e.currentTarget) return;
+                            if (roBlock(e)) return;
                             if (pop) { setPop(null); return; }
                             if (!showVisits || !canEdit) return;
                             setVm({ init: { date: d, min: slotFrom(e), room: rid } });
                           }}
                           onContextMenu={(e) => {
+                            if (RO) { roBlock(e); return; }
                             if (!showVisits || !canEdit || e.target !== e.currentTarget) return;
                             e.preventDefault();
                             setCtx({ date: d, min: slotFrom(e), room: rid, x: e.clientX, y: e.clientY });
                           }}>
+                          {over === `${di}-${ci}` && <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1] border-2 border-dashed border-primary bg-[rgba(0,161,219,.08)]" />}
                           {dayVisits.map((v) => {
                             const p = pmap.get(v.patient_id);
                             const b = balanceInfo(balances.data?.get(v.patient_id));
                             const m = mByUser.get(v.doctor_id ?? '');
                             const c = view.docColor ? m?.color ?? '#0ea5e9' : VISIT_STATUS[v.status].color;
                             const s = minOf(v.starts_at);
-                            let h = Math.max(px(minOf(v.ends_at)) - px(s), 18);
+                            let h = Math.max(px(rz?.id === v.id ? rz.end : minOf(v.ends_at)) - px(s), 18);
                             if (view.shrink && (v.status === 'no_show' || v.status === 'moved')) h = Math.max(18, slotH / 3);
                             const dead = DEAD_STATUS.includes(v.status);
                             const nameColor = b.n < 0 ? '#dc2626' : b.n > 0 && view.green ? '#15803d' : '#0f172a';
                             return (
                               <div key={v.id}>
                                 <div role="button" tabIndex={0} aria-label={`${p?.full_name ?? ''}, ${hm(v.starts_at)}, ${VISIT_STATUS[v.status].label}`}
-                                  title="Bir marta — ma’lumot, ikki marta — qabul oynasi"
-                                  onClick={(e) => { e.stopPropagation(); setPop(pop === v.id ? null : v.id); setCtx(null); }}
-                                  onDoubleClick={(e) => { e.stopPropagation(); setPop(null); setVm({ visit: v }); }}
+                                  title={canEdit ? 'Bir marta — ma’lumot, ikki marta — qabul oynasi. Sudrab boshqa kabinet yoki vaqtga ko‘chiring, pastki chetidan cho‘zing' : 'Bir marta — ma’lumot'}
+                                  draggable={canEdit}
+                                  onDragStart={(e) => { drag.current = { id: v.id, gy: e.clientY - e.currentTarget.getBoundingClientRect().top }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', v.id); setTimeout(() => { setDragId(v.id); setPop(null); }, 0); }}
+                                  onDragEnd={() => { drag.current = null; setDragId(null); setOver(null); }}
+                                  onClick={(e) => { e.stopPropagation(); if (roBlock(e)) return; setPop(pop === v.id ? null : v.id); setCtx(null); }}
+                                  onDoubleClick={(e) => { e.stopPropagation(); if (roBlock(e)) return; setPop(null); setVm({ visit: v }); }}
                                   onKeyDown={(e) => { if (e.key === 'Enter') setVm({ visit: v }); }}
-                                  className="absolute right-0.5 left-0.5 z-10 box-border cursor-pointer overflow-hidden rounded-md px-2 py-1 text-[11px] leading-tight text-[#334155] shadow-[0_1px_2px_rgba(0,0,0,.05)]"
+                                  className="absolute right-0.5 left-0.5 z-10 box-border cursor-grab overflow-hidden rounded-md px-2 py-1 text-[11px] leading-tight text-[#334155] shadow-[0_1px_2px_rgba(0,0,0,.05)]"
                                   style={{ top: px(s), height: h, border: `1px solid ${c}30`, borderLeft: `4px solid ${c}`, background: `${c}14`,
-                                    opacity: view.transparent && dead ? 0.45 : 1, outline: pop === v.id ? '2px solid #f59e0b' : undefined, outlineOffset: 1 }}>
+                                    opacity: dragId === v.id ? 0.4 : view.transparent && dead ? 0.45 : 1, outline: pop === v.id ? '2px solid #f59e0b' : undefined, outlineOffset: 1 }}>
                                   <div className="flex items-center justify-between gap-1">
                                     <span className="truncate font-semibold text-[#1e293b]">{hm(v.starts_at)} – {hm(v.ends_at)}</span>
                                     <span className="flex flex-none items-center gap-1">
@@ -219,10 +267,16 @@ export function Schedule() {
                                     {p?.full_name ?? '…'} <span className="text-[10px] font-normal text-[#64748b]">№{p?.card_number}</span>
                                   </div>
                                   {h >= 54 && v.comment && <div className="truncate text-[11px] text-[#334155]">{v.comment}</div>}
+                                  {canEdit && (
+                                    <div onPointerDown={(e) => startResize(e, v)} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} draggable={false} title="Sudrab vaqtni cho‘zing"
+                                      className="absolute right-0 bottom-0 left-0 flex h-[9px] cursor-ns-resize touch-none items-center justify-center">
+                                      <span className="h-[3px] w-6 rounded-full bg-[#94a3b8]/60" />
+                                    </div>
+                                  )}
                                 </div>
                                 {pop === v.id && p && (
                                   <VisitPopover v={v} p={p} bal={b} top={px(s)} right={lastCol || ci === cols.length - 1 && di === days.length - 1}
-                                    onClose={() => setPop(null)} onEdit={() => { setPop(null); setVm({ visit: v }); }} onCopy={() => setClip(v)} />
+                                    onClose={() => setPop(null)} onEdit={() => { setPop(null); setVm({ visit: v }); }} onCopy={() => setClip(v)} onWorks={() => { setPop(null); setWorks(v); }} />
                                 )}
                               </div>
                             );
@@ -278,14 +332,29 @@ export function Schedule() {
         <VisitModal branch={branch} rooms={allRooms} visit={vm.visit} patient={vm.visit ? pmap.get(vm.visit.patient_id) ?? null : null} init={vm.init}
           onClose={() => setVm(null)} onCopy={setClip} onSaved={() => { if (vm.waitId) dropWait.mutate(vm.waitId); }} />
       )}
-      {gear && <ViewSettings view={view} rooms={allRooms} onClose={() => setGear(false)} onSave={(v) => { setView(v); setSolo(null); setGear(false); }} />}
+      {gear && <ViewSettings view={view} rooms={allRooms} viewBr={branch.id} ownBr={ownBranch.id} onClose={() => setGear(false)}
+        onSave={(v, br) => { setView(v); setSolo(null); setGear(false); setViewBr(br === ownBranch.id ? null : br); setRoWarn(false); }} />}
+      {RO && roWarn && (
+        <div role="alert" className="fixed top-[72px] left-1/2 z-[2500] flex w-[520px] max-w-[calc(100vw-32px)] -translate-x-1/2 flex-col gap-2.5 rounded-xl border border-[#fecaca] bg-[#fef2f2] px-[18px] py-4 text-[#7f1d1d] shadow-pop">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle size={20} className="mt-0.5 flex-none text-[#dc2626]" />
+            <div className="flex flex-1 flex-col gap-0.5"><b className="text-[15px]">Bu jadval bu filialniki emas</b>
+              <span className="text-sm">Siz «{roBranch!.name}» filiali jadvalini ko‘ryapsiz. Bu yerda faqat ko‘rish mumkin, o‘zgartirib bo‘lmaydi.</span></div>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" onClick={() => { setRoWarn(false); setViewBr(null); }} className="h-9 rounded-lg border border-[#fecaca] bg-white px-3.5 text-sm text-[#7f1d1d]">O‘z jadvalimga qaytish</button>
+            <button type="button" onClick={() => setRoWarn(false)} className="h-9 rounded-lg bg-[#dc2626] px-3.5 text-sm font-medium text-white">Tushunarli</button>
+          </div>
+        </div>
+      )}
+      {works && pmap.get(works.patient_id) && <WorksWizard visit={works} patient={pmap.get(works.patient_id)!} onClose={() => setWorks(null)} />}
     </div>
   );
 }
 
 /** Qabulni bir marta bosganda chiqadigan oyna: bemor ma'lumoti, tezkor akt va to'lov. */
-function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy }: {
-  v: Visit; p: Patient; bal: ReturnType<typeof balanceInfo>; top: number; right: boolean; onClose: () => void; onEdit: () => void; onCopy: () => void;
+function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy, onWorks }: {
+  v: Visit; p: Patient; bal: ReturnType<typeof balanceInfo>; top: number; right: boolean; onClose: () => void; onEdit: () => void; onCopy: () => void; onWorks: () => void;
 }) {
   const { branch, members, memberName, can, me } = useOrg();
   const [mode, setMode] = useState<'info' | 'pay' | 'act'>('info');
@@ -310,7 +379,8 @@ function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy }: {
     await http.post(`/api/acts/${a.id}/close`);
     return it;
   }, { invalidate: ['acts', 'patients', 'stock_balances'], onDone: (it) => { setMsg(`Akt yopildi: ${it.name}`); setMode('info'); } });
-  const nextMood = () => { const ms = MOODS.map((m) => m[0]); const n = ms[(ms.indexOf(v.mood || '🙂') + 1) % ms.length]!; upd.mutate({ mood: n === '🙂' ? null : n }); };
+  const [moodOpen, setMoodOpen] = useState(false);
+  const acts = useList<Act>('acts', { patient_id: p.id, status: 'closed' });
   const age = ageOf(p.birth_date);
   const BTN = 'h-[30px] rounded px-2.5 text-[13px] text-white';
 
@@ -327,7 +397,7 @@ function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy }: {
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <span className="flex gap-1.5">
-            <button type="button" onClick={nextMood} disabled={!can('schedule.edit', branch.id)} aria-label="Bemor belgisi" title="Bemor belgisi"
+            <button type="button" onClick={() => setMoodOpen(!moodOpen)} aria-expanded={moodOpen} disabled={!can('schedule.edit', branch.id)} aria-label="Bemor belgisi" title="Bemor belgisi"
               className="h-[30px] w-[30px] rounded-full border-[1.5px] border-sub bg-white text-[15px] leading-none">{v.mood || '🙂'}</button>
             <select aria-label="Holati" value={v.status} disabled={!can('schedule.edit', branch.id)} onChange={(e) => upd.mutate({ status: e.target.value as VisitStatus })}
               className="h-[30px] rounded px-2 text-[13px] text-white" style={{ background: VISIT_STATUS[v.status].color }}>
@@ -337,10 +407,24 @@ function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy }: {
           <button type="button" onClick={onClose} aria-label="Yopish" className="text-base text-faint">×</button>
         </div>
       </div>
+      {moodOpen && (
+        <div role="group" aria-label="Bemor belgisini tanlang" className="grid max-h-[236px] grid-cols-8 gap-0.5 overflow-auto rounded-lg border border-line bg-white p-1.5 shadow-[0_4px_16px_rgba(7,18,30,.08)]">
+          {MOOD_GRID.map((e) => (
+            <button key={e} type="button" aria-label={e} onClick={() => { upd.mutate({ mood: e === '🙂' ? null : e }); setMoodOpen(false); }}
+              className={cx('h-8 rounded-md text-lg hover:bg-muted', (v.mood || '🙂') === e && 'bg-primary-soft')}>{e}</button>
+          ))}
+        </div>
+      )}
       <div className="flex justify-between gap-2 border-y border-muted py-2">
         <span>{dayLabel(new Date(v.starts_at))}  {hm(v.starts_at)} – {hm(v.ends_at)}</span>
         <span className="font-semibold" style={{ color: bal.color }}>{bal.label}</span>
       </div>
+      {can('patients.edit', branch.id) && (
+        <button type="button" onClick={onWorks} className="flex min-h-9 w-full items-center gap-2 rounded-md border border-dashed border-primary bg-[#f2fbff] px-2.5 text-[13px] font-semibold text-primary-hover">
+          <CatIconSvg icon="tooth" size={16} /> Bajarilgan ish
+          <span className="ml-auto text-xs font-normal text-sub">{acts.data?.length ? `${acts.data.length} ta yozuv` : 'materiallarni yozish'}</span>
+        </button>
+      )}
       <div className="flex flex-col gap-0.5">
         <span>Mutaxassis: <b className="font-medium">{memberName(v.doctor_id)}</b></span>
         {age !== null && <span>{age} yosh <span className="text-faint">{dmy(p.birth_date)}</span></span>}
@@ -387,9 +471,10 @@ function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy }: {
 }
 
 /** "Jadval ko'rinishi" oynasi. */
-function ViewSettings({ view, rooms, onClose, onSave }: { view: View; rooms: Room[]; onClose: () => void; onSave: (v: View) => void }) {
-  const { members } = useOrg();
+function ViewSettings({ view, rooms, viewBr, ownBr, onClose, onSave }: { view: View; rooms: Room[]; viewBr: string; ownBr: string; onClose: () => void; onSave: (v: View, br: string) => void }) {
+  const { members, branches } = useOrg();
   const [g, setG] = useState(view);
+  const [br, setBr] = useState(viewBr);
   const [more, setMore] = useState(false);
   const doctors = members.filter((m) => m.is_active && ['doctor', 'owner'].includes(m.role));
   const noRoom = rooms.length > 0 && rooms.every((r) => g.hiddenRooms.includes(r.id));
@@ -404,6 +489,22 @@ function ViewSettings({ view, rooms, onClose, onSave }: { view: View; rooms: Roo
           <button type="button" onClick={onClose} aria-label="Yopish" className="h-9 w-9 text-[22px] leading-none text-sub">×</button>
         </div>
         <div className="flex flex-col gap-[18px] px-6 pt-6 pb-5">
+          {branches.length > 1 && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-8">
+              <span className={L}>Filial jadvali</span>
+              <div role="radiogroup" aria-label="Filial jadvali" className="flex flex-wrap gap-0.5 rounded-lg bg-muted p-[3px]">
+                {branches.map((b) => {
+                  const on = b.id === br, own = b.id === ownBr;
+                  return (
+                    <button key={b.id} type="button" role="radio" aria-checked={on} onClick={() => setBr(b.id)}
+                      className={cx('h-8 rounded-md px-3.5 text-sm', on ? (own ? 'bg-primary font-semibold text-white' : 'bg-[#dc2626] font-semibold text-white') : 'text-[#3d4858]')}>
+                      {b.name}{own && ' (shu filial)'}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-8">
             <span className={L}>Jadval turi</span>
             <div role="radiogroup" aria-label="Jadval turi" className="flex flex-wrap gap-0.5 rounded-lg bg-muted p-[3px]">
@@ -478,7 +579,7 @@ function ViewSettings({ view, rooms, onClose, onSave }: { view: View; rooms: Roo
             className={cx('grid h-10 w-10 place-items-center rounded-md', more ? 'bg-primary-soft' : 'hover:bg-muted')}><SlidersHorizontal size={20} /></button>
           <span className="flex-1" />
           <Button onClick={onClose}>Bekor qilish</Button>
-          <Button variant="primary" disabled={noRoom} onClick={() => onSave(g)}>Saqlash</Button>
+          <Button variant="primary" disabled={noRoom} onClick={() => onSave(g, br)}>Saqlash</Button>
         </div>
       </div>
     </div>

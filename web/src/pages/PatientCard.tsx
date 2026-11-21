@@ -272,6 +272,7 @@ export function ServicePicker({ onPick, onClose, withTooth }: { onPick: (l: { it
 }
 
 // ---------------- Davolash tarixi ----------------
+interface WorkRow { act_id: string; act_date: string; doctor_id: string | null; works: string[]; mats: { name: string; unit: string; qty: number }[] }
 function HistoryTab({ p }: { p: Patient }) {
   const { can, me, branch, members, memberName } = useOrg();
   const recs = useList<TreatmentRecord>('treatment_records', { patient_id: p.id });
@@ -282,11 +283,15 @@ function HistoryTab({ p }: { p: Patient }) {
     { invalidate: ['treatment_records'], success: 'Yozuv qo‘shildi', onDone: () => { setF({ tooth: '', diagnosis: '', description: '' }); setOpen(false); } });
   const del = useAction((id: string) => db.remove('treatment_records', id), { invalidate: ['treatment_records'] });
   const list = (recs.data ?? []).filter((r) => !q || `${r.diagnosis} ${r.description} ${r.tooth}`.toLowerCase().includes(q.toLowerCase()));
+  const works = useQuery({ queryKey: ['acts', 'works', p.id], queryFn: () => http.get<WorkRow[]>(`/api/patients/${p.id}/works`) });
+  const wl = (works.data ?? []).filter((w) => !q || `${w.works.join(' ')} ${w.mats.map((m) => m.name).join(' ')}`.toLowerCase().includes(q.toLowerCase()));
   const byDay = useMemo(() => {
-    const m = new Map<string, TreatmentRecord[]>();
-    for (const r of list) { const k = isoDate(new Date(r.created_at)); m.set(k, [...(m.get(k) ?? []), r]); }
-    return [...m.entries()];
-  }, [list]);
+    const m = new Map<string, { recs: TreatmentRecord[]; works: WorkRow[] }>();
+    const get = (k: string) => { const v = m.get(k) ?? { recs: [], works: [] }; m.set(k, v); return v; };
+    for (const r of list) get(isoDate(new Date(r.created_at))).recs.push(r);
+    for (const w of wl) get(w.act_date).works.push(w);
+    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  }, [list, wl]);
   const color = (u: string | null) => members.find((m) => m.user_id === u)?.color ?? '#0ea5e9';
   return (
     <div className="flex max-w-[1000px] flex-col gap-4">
@@ -308,14 +313,34 @@ function HistoryTab({ p }: { p: Patient }) {
           <div className="flex justify-end gap-2"><Button onClick={() => setOpen(false)}>Bekor qilish</Button><Button variant="primary" disabled={!f.diagnosis && !f.description} loading={add.isPending} onClick={() => add.mutate(undefined)}>Saqlash</Button></div>
         </section>
       )}
-      {list.length === 0 && <Empty>Yozuvlar yo‘q</Empty>}
-      {byDay.map(([day, rs]) => (
+      {byDay.length === 0 && <Empty>Yozuvlar yo‘q</Empty>}
+      {byDay.map(([day, { recs: rs, works: ws }]) => (
         <div key={day} className="flex flex-col gap-4">
           <div className="flex items-center gap-3">
             <span className="h-px flex-1 bg-line" />
             <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-sub">📅 {new Date(day).getDate()}-{MONTHS[new Date(day).getMonth()]} {new Date(day).getFullYear()}</span>
             <span className="h-px flex-1 bg-line" />
           </div>
+          {ws.map((w) => (
+            <section key={w.act_id} className="rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04)]">
+              <div className="flex gap-3 p-4">
+                <span className="grid h-9 w-9 flex-none place-items-center rounded-full text-xs font-semibold text-white" style={{ background: color(w.doctor_id) }}>{initials(memberName(w.doctor_id))}</span>
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-base font-semibold">{w.works.join(', ') || 'Ish'}</span>
+                    <span className="rounded-full bg-ok-soft px-2 py-0.5 text-xs font-medium text-[#166534]">Bajarilgan ish</span>
+                  </div>
+                  <span className="text-xs text-sub"><span style={{ color: color(w.doctor_id) }}>{memberName(w.doctor_id)}</span> · {dmy(w.act_date)}</span>
+                  {w.mats.length > 0 && (
+                    <div className="flex flex-col overflow-hidden rounded-[10px] border border-muted">
+                      <span className="bg-surface px-3 py-1.5 text-xs font-semibold text-sub">Ishlatilgan materiallar · ombordan chiqarildi</span>
+                      {w.mats.map((m) => <div key={m.name} className="flex justify-between gap-3 border-t border-muted px-3 py-1.5 text-sm"><span>{m.name}</span><b className="font-semibold tabular-nums">{money(m.qty)} {m.unit}</b></div>)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+          ))}
           {rs.map((r) => (
             <section key={r.id} className="rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04)]">
               <div className="flex gap-3 p-4">
