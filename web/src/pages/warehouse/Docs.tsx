@@ -28,7 +28,7 @@ export function Docs({ wh }: { wh: WhCtx }) {
 function docSum(lines: StockDocLine[]) { return lines.reduce((a, l) => a + l.qty * l.price, 0); }
 
 function DocList({ wh, type, onOpen }: { wh: WhCtx; type: StockDocType; onOpen: (d: StockDoc) => void }) {
-  const { memberName, can, branch } = useOrg();
+  const { memberName, can } = useOrg();
   const docs = useList<StockDoc>('stock_docs', { type }, { limit: 2000 });
   const ids = (docs.data ?? []).map((d) => d.id);
   const lines = useList<StockDocLine>('stock_doc_lines', { 'doc_id.in': ids }, { enabled: ids.length > 0 && ids.length < 400 });
@@ -40,7 +40,7 @@ function DocList({ wh, type, onOpen }: { wh: WhCtx; type: StockDocType; onOpen: 
   const myWhs = wh.warehouses.filter((w) => wh.canEdit(w));
 
   const create = useAction(() => {
-    const w = myWhs.find((x) => x.branch_id === branch.id && x.is_main) ?? myWhs[0];
+    const w = myWhs.find((x) => x.is_main) ?? myWhs[0];
     if (!w) throw new Error('Nakladnoy yaratish uchun ruxsat yo‘q');
     const to = type === 'transfer' ? wh.warehouses.find((x) => x.id !== w.id) : undefined;
     return db.insert<StockDoc>('stock_docs', { type, warehouse_id: w.id, to_warehouse_id: to?.id ?? null, reason: type === 'writeoff' ? 'usage' : null });
@@ -56,7 +56,8 @@ function DocList({ wh, type, onOpen }: { wh: WhCtx; type: StockDocType; onOpen: 
   const party = (d: StockDoc) => type === 'transfer' ? wh.whLabel(wh.whMap.get(d.to_warehouse_id ?? ''))
     : type === 'writeoff' ? WRITEOFF_REASON[d.reason ?? 'other'] ?? d.reason ?? '' : wh.supMap.get(d.counterparty_id ?? '')?.name ?? '';
   const has = (v: string, n: string) => !n || v.toLowerCase().includes(n.toLowerCase());
-  const rows = (docs.data ?? []).filter((d) => {
+  // Faqat shu filial omborlariga tegishli nakladnoylar.
+  const rows = (docs.data ?? []).filter((d) => wh.whMap.has(d.warehouse_id) || wh.whMap.has(d.to_warehouse_id ?? '')).filter((d) => {
     const s = docSum(byDoc.get(d.id) ?? []);
     return has(d.number, f.no) && (!f.st || (f.st === 'draft' ? d.status === 'draft' : d.status !== 'draft'))
       && has(party(d), f.party) && has(wh.whLabel(wh.whMap.get(d.warehouse_id)), f.wh) && has(memberName(d.responsible_id), f.resp)

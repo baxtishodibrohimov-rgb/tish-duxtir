@@ -6,7 +6,7 @@ import { addDays, dmy, dmyhm, isoDate, money, som } from '@/lib/format';
 import { Link, useTitle } from '@/lib/router';
 import { ArrowLeft, ChartColumn, CalendarCheck, ChartLine, Users, WalletCards, Download, Printer } from 'lucide-react';
 import { downloadCsv } from './warehouse/Docs';
-import { Card, Empty, Input, PageLoader, Select, cx } from '@/components/ui';
+import { Card, Empty, Input, PageLoader, cx } from '@/components/ui';
 
 interface Overview {
   byDoctor: { doctor_id: string | null; name: string; acts: number; total: number }[];
@@ -19,11 +19,11 @@ interface Overview {
 
 export function Overview() {
   useTitle('Umumiy hisobot');
-  const { branches, branch } = useOrg();
+  const { branch } = useOrg();
   const t = new Date();
   const [from, setFrom] = useState(isoDate(new Date(t.getFullYear(), t.getMonth(), 1)));
   const [to, setTo] = useState(isoDate(t));
-  const [br, setBr] = useState(branches.length > 1 ? '' : branch.id);
+  const br = branch.id; // hisobotlar faqat joriy filial bo'yicha
   const q = useQuery({
     queryKey: ['reports', from, to, br],
     queryFn: () => http.get<Overview>(`/api/reports/overview?from=${from}&to=${to}${br ? `&branch_id=${br}` : ''}`),
@@ -45,14 +45,9 @@ export function Overview() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-1">
           <Link to="/reports" className="inline-flex items-center gap-1.5 text-sm !text-sub no-underline"><ArrowLeft size={15} /> Hisobotlar</Link>
-          <h1 className="m-0 text-[22px] font-semibold">Umumiy hisobot</h1>
+          <h1 className="m-0 text-[22px] font-semibold">Umumiy hisobot <span className="text-base font-normal text-sub">· {branch.name}</span></h1>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {branches.length > 1 && (
-            <Select aria-label="Filial" value={br} onChange={(e) => setBr(e.target.value)} className="!h-8 !w-44">
-              <option value="">Barcha filiallar</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </Select>
-          )}
           {presets.map(([l, f, tt]) => (
             <button key={l} type="button" onClick={() => { setFrom(f); setTo(tt); }}
               className={cx('h-8 rounded-lg px-2.5 text-[13px] font-medium', from === f && to === tt ? 'bg-nav' : 'text-sub hover:bg-muted')}>{l}</button>
@@ -79,17 +74,6 @@ export function Overview() {
               ))}
             </div>
           </Card>
-          {branches.length > 1 && (
-            <Card className="p-4">
-              <h2 className="m-0 mb-3 text-base font-semibold">Filiallar bo‘yicha</h2>
-              <table className="w-full text-sm">
-                <thead><tr className="text-left text-xs text-sub"><th className="pb-2 font-medium">Filial</th><th className="pb-2 text-right font-medium">Kirim</th><th className="pb-2 text-right font-medium">Xarajat</th><th className="pb-2 text-right font-medium">Foyda</th></tr></thead>
-                <tbody>{d.byBranch.map((b) => (
-                  <tr key={b.id} className="border-t border-line"><td className="py-2">{b.name}</td><td className="py-2 text-right">{money(b.income)}</td><td className="py-2 text-right text-bad">{money(b.expense)}</td><td className="py-2 text-right font-semibold">{money(b.income - b.expense)}</td></tr>
-                ))}</tbody>
-              </table>
-            </Card>
-          )}
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
@@ -184,11 +168,11 @@ interface Table { title: string; cols: [string, string, ('money' | 'num' | 'date
 
 /** Bitta jadval hisoboti: davr, filial, CSV va chop etish. */
 export function ReportPage({ slug }: { slug: string }) {
-  const { branches, branch } = useOrg();
+  const { branch } = useOrg();
   const t = new Date();
   const [from, setFrom] = useState(isoDate(new Date(t.getFullYear(), t.getMonth(), 1)));
   const [to, setTo] = useState(isoDate(t));
-  const [br, setBr] = useState(branches.length > 1 ? '' : branch.id);
+  const br = branch.id; // hisobotlar faqat joriy filial bo'yicha
   const q = useQuery({
     queryKey: ['reports', 'table', slug, from, to, br], enabled: slug !== 'umumiy',
     queryFn: () => http.get<Table>(`/api/reports/table/${slug}?from=${from}&to=${to}${br ? `&branch_id=${br}` : ''}`),
@@ -203,12 +187,9 @@ export function ReportPage({ slug }: { slug: string }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-1">
           <Link to="/reports" className="inline-flex items-center gap-1.5 text-sm !text-sub no-underline print:hidden"><ArrowLeft size={15} /> Hisobotlar</Link>
-          <h1 className="m-0 text-[22px] font-semibold">{d?.title ?? '…'}</h1>
+          <h1 className="m-0 text-[22px] font-semibold">{d?.title ?? "…"} <span className="text-base font-normal text-sub">· {branch.name}</span></h1>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-          {branches.length > 1 && (
-            <Select aria-label="Filial" value={br} onChange={(e) => setBr(e.target.value)} className="!h-8 !w-44"><option value="">Barcha filiallar</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select>
-          )}
           <Input type="date" aria-label="Dan" value={from} onChange={(e) => setFrom(e.target.value)} className="!h-8 !w-40" />
           <Input type="date" aria-label="Gacha" value={to} onChange={(e) => setTo(e.target.value)} className="!h-8 !w-40" />
           {d && <button type="button" aria-label="Excel (CSV) ga yuklab olish" title="Excel (CSV) ga yuklab olish" onClick={() => downloadCsv(`${d.title}.csv`, [d.cols.map((c) => c[1]), ...d.rows.map((r) => d.cols.map(([k, , kind]) => (kind === 'money' || kind === 'num' ? Number(r[k] ?? 0) : fmt(r[k], kind))))])}

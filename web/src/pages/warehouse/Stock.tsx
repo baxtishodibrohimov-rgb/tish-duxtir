@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Package, Recycle, Move, List as ListIcon } from 'lucide-react';
-import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
 import { dmyhm, money } from '@/lib/format';
@@ -13,10 +12,8 @@ import { DOC_TYPE, WRITEOFF_REASON, fmtQty, type WhCtx } from './common';
 type Filter = 'all' | 'ok' | 'low' | 'out' | 'neg';
 
 export function Stock({ wh }: { wh: WhCtx }) {
-  const { branch } = useOrg();
-  const mine = wh.warehouses.filter((w) => w.branch_id === branch.id);
-  const others = wh.warehouses.filter((w) => w.branch_id !== branch.id);
-  const tabs = [...mine, ...others];
+  const mine = wh.warehouses;
+  const tabs = mine;
   const [whId, setWhId] = useState<string>('all');
   const [q, setQ] = useState('');
   const [f, setF] = useState<Filter>('all');
@@ -28,7 +25,7 @@ export function Stock({ wh }: { wh: WhCtx }) {
 
   const quick = useAction(async ({ p, type }: { p: Product; type: 'writeoff' | 'transfer' }) => {
     if (!actWh) throw new Error('Ombor tanlanmagan');
-    const target = type === 'transfer' ? wh.warehouses.find((w) => w.id !== actWh.id && w.branch_id === actWh.branch_id) ?? wh.warehouses.find((w) => w.id !== actWh.id) : undefined;
+    const target = type === 'transfer' ? wh.warehouses.find((w) => w.id !== actWh.id) : undefined;
     const d = await db.insert<StockDoc>('stock_docs', { type, warehouse_id: actWh.id, to_warehouse_id: target?.id ?? null, reason: type === 'writeoff' ? 'usage' : null });
     await db.insert('stock_doc_lines', { doc_id: d.id, product_id: p.id, qty: 1 });
     return d;

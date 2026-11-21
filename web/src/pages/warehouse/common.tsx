@@ -24,16 +24,16 @@ export function fmtQty(p: Pick<Product, 'unit' | 'pack_unit' | 'pack_qty'> | und
 
 /** Ombor sahifalari uchun umumiy ma'lumotlar. */
 export function useWh() {
-  const { branches, can } = useOrg();
-  const warehouses = useList<Warehouse>('warehouses', { archived: false });
+  const { can, branch } = useOrg();
+  // Har bir filial o'z omborlari bilan ishlaydi: boshqa filial omborlari ko'rinmaydi.
+  const warehouses = useList<Warehouse>('warehouses', { archived: false, branch_id: branch.id });
   const products = useList<Product>('products');
   const cats = useList<ProductCategory>('product_categories');
   const brands = useList<Brand>('brands');
   const balances = useList<StockBalance>('stock_balances');
   const settings = useList<ProductWhSetting>('product_wh_settings');
   const suppliers = useList<Counterparty>('counterparties', { type: 'supplier' });
-  const bmap = byId(branches);
-  const whLabel = (w: Warehouse | undefined) => (w ? (branches.length > 1 ? `${w.name} · ${bmap.get(w.branch_id)?.name ?? ''}` : w.name) : '—');
+  const whLabel = (w: Warehouse | undefined) => (w ? w.name : '—');
   const bal = new Map<string, number>();
   for (const b of balances.data ?? []) bal.set(`${b.product_id}|${b.warehouse_id}`, b.qty);
   const set = new Map<string, ProductWhSetting>();

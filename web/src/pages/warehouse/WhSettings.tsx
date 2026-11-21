@@ -34,24 +34,22 @@ export function WhSettings({ wh }: { wh: WhCtx }) {
 function Warehouses({ wh }: { wh: WhCtx }) {
   const { branches, members, memberName, branch } = useOrg();
   const [arch, setArch] = useState(false);
-  const all = useList<Warehouse>('warehouses', arch ? {} : { archived: false });
+  const all = useList<Warehouse>('warehouses', arch ? { branch_id: branch.id } : { archived: false, branch_id: branch.id });
   const [open, setOpen] = useState<Warehouse | 'new' | null>(null);
-  const bmap = byId(branches);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="m-0 text-lg font-semibold">Omborlar</h2>
+        <h2 className="m-0 text-lg font-semibold">Omborlar · {branch.name}</h2>
         <Button variant="primary" size="sm" onClick={() => setOpen('new')}><Plus size={15} /> Ombor qo‘shish</Button>
         <label className="ml-auto flex items-center gap-1.5 text-sm text-sub"><input type="checkbox" checked={arch} onChange={(e) => setArch(e.target.checked)} /> Arxivdagilarni ko‘rsatish</label>
       </div>
       <Card className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
-          <thead className="bg-muted text-left text-xs font-semibold text-sub"><tr><th className="px-3 py-2">Nomi</th><th className="px-3 py-2">Filial</th><th className="px-3 py-2">Javobgar</th><th className="px-3 py-2">Izoh</th><th /></tr></thead>
+          <thead className="bg-muted text-left text-xs font-semibold text-sub"><tr><th className="px-3 py-2">Nomi</th><th className="px-3 py-2">Javobgar</th><th className="px-3 py-2">Izoh</th><th /></tr></thead>
           <tbody>
             {(all.data ?? []).map((w) => (
               <tr key={w.id} className={cx('border-t border-line', w.archived && 'opacity-50')}>
                 <td className="px-3 py-2 font-medium">{w.name} {w.is_main && <span className="ml-1 rounded-full bg-primary-soft px-2 py-0.5 text-xs font-normal text-[#006b93]">asosiy</span>}</td>
-                <td className="px-3 py-2">{bmap.get(w.branch_id)?.name}</td>
                 <td className="px-3 py-2">{memberName(w.responsible_id)}</td>
                 <td className="px-3 py-2 text-sub">{w.note}</td>
                 <td className="w-10 px-2"><button type="button" aria-label="Tahrirlash" onClick={() => setOpen(w)} className="text-sub hover:text-fg"><Pencil size={15} /></button></td>
@@ -66,7 +64,7 @@ function Warehouses({ wh }: { wh: WhCtx }) {
   );
 }
 
-function WarehouseModal({ w, defBranch, branches, members, onClose }: { w?: Warehouse; defBranch: string; branches: { id: string; name: string }[]; members: { user_id: string; full_name: string; is_active: boolean }[]; onClose: () => void; wh: WhCtx }) {
+function WarehouseModal({ w, defBranch, members, onClose }: { w?: Warehouse; defBranch: string; branches: { id: string; name: string }[]; members: { user_id: string; full_name: string; is_active: boolean }[]; onClose: () => void; wh: WhCtx }) {
   const [f, setF] = useState({ name: w?.name ?? '', branch_id: w?.branch_id ?? defBranch, responsible_id: w?.responsible_id ?? '', is_main: w?.is_main ?? false, note: w?.note ?? '', archived: w?.archived ?? false });
   const save = useAction(async () => {
     if (!f.name.trim()) throw new Error('Nomini kiriting');
@@ -84,7 +82,6 @@ function WarehouseModal({ w, defBranch, branches, members, onClose }: { w?: Ware
       <div className="flex flex-col gap-3">
         <Field label="Nomi *">{(id) => <Input id={id} value={f.name} placeholder="Masalan: 1-kabinet" onChange={(e) => setF({ ...f, name: e.target.value })} />}</Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Filial">{(id) => <Select id={id} value={f.branch_id} disabled={!!w} onChange={(e) => setF({ ...f, branch_id: e.target.value })}>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select>}</Field>
           <Field label="Javobgar">{(id) => <Select id={id} value={f.responsible_id} onChange={(e) => setF({ ...f, responsible_id: e.target.value })}><option value="">—</option>{members.filter((m) => m.is_active).map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name}</option>)}</Select>}</Field>
         </div>
         <Switch checked={f.is_main} onChange={(v) => setF({ ...f, is_main: v })} label="Asosiy ombor" />

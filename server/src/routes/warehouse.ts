@@ -88,7 +88,7 @@ export async function warehouseRoutes(app: FastifyInstance) {
   });
 
   // Hisobot: hisobdan chiqarishlar sabab bo'yicha.
-  app.get<{ Querystring: { from: string; to: string } }>('/api/stock/writeoffs', async (req) => {
+  app.get<{ Querystring: { from: string; to: string; branch_id?: string } }>('/api/stock/writeoffs', async (req) => {
     const m = requireMember(req);
     if (!can(m, 'warehouse.view')) throw forbidden();
     return tx(m.user_id, (c) => many(c,
@@ -96,8 +96,8 @@ export async function warehouseRoutes(app: FastifyInstance) {
               -sum(mv.qty) qty, -sum(mv.cost) cost
          from stock_moves mv join stock_docs d on d.id = mv.doc_id and d.type = 'writeoff' and d.status = 'posted' and d.reversal_of is null
          join products p on p.id = mv.product_id join warehouses w on w.id = mv.warehouse_id
-        where mv.org_id = $1 and w.branch_id = any($2) and d.doc_date between $3 and $4
-        group by 1, 2, 3, 4, 5 order by cost desc`, [m.org_id, m.branch_ids, req.query.from, req.query.to]));
+        where mv.org_id = $1 and w.branch_id = any($2) and d.doc_date between $3 and $4 and ($5::uuid is null or w.branch_id = $5)
+        group by 1, 2, 3, 4, 5 order by cost desc`, [m.org_id, m.branch_ids, req.query.from, req.query.to, uuidOrNull(req.query.branch_id)]));
   });
 
   app.get('/api/stock/supplier-debts', async (req) => {
@@ -106,12 +106,13 @@ export async function warehouseRoutes(app: FastifyInstance) {
     return tx(m.user_id, (c) => many(c, 'select * from supplier_debts where org_id = $1 order by purchased - paid desc', [m.org_id]));
   });
 
-  app.get('/api/stock/low', async (req) => {
+  app.get<{ Querystring: { branch_id?: string } }>('/api/stock/low', async (req) => {
     const m = requireMember(req);
     if (!can(m, 'warehouse.view')) throw forbidden();
     return tx(m.user_id, (c) => many(c,
       `select l.* from low_stock l join warehouses w on w.id = l.warehouse_id
-        where l.org_id = $1 and w.branch_id = any($2) order by l.warehouse_name, l.name`, [m.org_id, m.branch_ids]));
+        where l.org_id = $1 and w.branch_id = any($2) and ($3::uuid is null or w.branch_id = $3)
+        order by l.warehouse_name, l.name`, [m.org_id, m.branch_ids, uuidOrNull(req.query.branch_id)]));
   });
 
   // Buyurtma ro'yxatidan kirim qoralamasi yaratish.
@@ -136,4 +137,11 @@ export async function warehouseRoutes(app: FastifyInstance) {
         return d;
       });
     });
+}
+
+/** So'rovdagi ixtiyoriy uuid: noto'g'ri qiymat filtrsiz deb olinmaydi, xato beradi. */
+function uuidOrNull(v?: string) {
+  if (!v) return null;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) throw bad('Noto‘g‘ri filial');
+  return v;
 }

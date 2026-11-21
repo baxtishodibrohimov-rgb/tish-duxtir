@@ -21,12 +21,11 @@ interface Wo { reason: string; product_id: string; name: string; unit: string; w
 interface Debt { counterparty_id: string; name: string; purchased: number; paid: number }
 
 export function WhReports({ wh }: { wh: WhCtx }) {
-  const { branch } = useOrg();
   const [r, setR] = useState<R>('turnover');
   const t = new Date();
   const [from, setFrom] = useState(isoDate(new Date(t.getFullYear(), t.getMonth(), 1)));
   const [to, setTo] = useState(isoDate(t));
-  const [whId, setWhId] = useState(() => wh.warehouses.find((w) => w.branch_id === branch.id && w.is_main)?.id ?? wh.warehouses[0]?.id ?? '');
+  const [whId, setWhId] = useState(() => wh.warehouses.find((w) => w.is_main)?.id ?? wh.warehouses[0]?.id ?? '');
 
   return (
     <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
@@ -92,7 +91,8 @@ function Value({ wh }: { wh: WhCtx }) {
 }
 
 function Writeoffs({ from, to }: { from: string; to: string }) {
-  const q = useQuery({ queryKey: ['stock', 'writeoffs', from, to], queryFn: () => http.get<Wo[]>(`/api/stock/writeoffs?from=${from}&to=${to}`) });
+  const { branch } = useOrg();
+  const q = useQuery({ queryKey: ['stock', 'writeoffs', branch.id, from, to], queryFn: () => http.get<Wo[]>(`/api/stock/writeoffs?from=${from}&to=${to}&branch_id=${branch.id}`) });
   if (q.isLoading) return <PageLoader />;
   const d = q.data ?? [];
   return <Table name="Hisobdan chiqarishlar" head={['Tovar', 'Sabab', 'Ombor', 'Miqdor', 'Tannarx, so‘m']}

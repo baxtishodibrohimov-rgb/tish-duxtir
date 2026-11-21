@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { http } from '@/lib/api';
+import { useOrg } from '@/lib/auth';
 import { useAction } from '@/lib/hooks';
 import { navigate } from '@/lib/router';
 import type { StockDoc } from '@/lib/types';
@@ -11,7 +12,8 @@ interface Low { product_id: string; warehouse_id: string; name: string; unit: st
 
 /** Kritik qoldiqqa tushgan tovarlar — ombor bo'yicha guruhlangan buyurtma ro'yxati. */
 export function Order({ wh }: { wh: WhCtx }) {
-  const low = useQuery({ queryKey: ['stock', 'low'], queryFn: () => http.get<Low[]>('/api/stock/low') });
+  const { branch } = useOrg();
+  const low = useQuery({ queryKey: ['stock', 'low', branch.id], queryFn: () => http.get<Low[]>(`/api/stock/low?branch_id=${branch.id}`) });
   const [qty, setQty] = useState<Record<string, number>>({});
   const [sup, setSup] = useState<Record<string, string>>({});
   const groups = useMemo(() => {
