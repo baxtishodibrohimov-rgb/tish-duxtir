@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell, Sparkles, X, ChevronDown, Plus } from 'lucide-react';
+import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell, X, ChevronDown, Plus, Pencil } from 'lucide-react';
 import { Link, navigate, useLocation } from '@/lib/router';
 import { useAuth, ROLE_LABEL } from '@/lib/auth';
 import { db } from '@/lib/api';
@@ -43,6 +43,9 @@ export function Header() {
   const [adding, setAdding] = useState<string | null>(null);
   const addBranch = useAction((name: string) => db.insert<{ id: string }>('branches', { name, position: branches.length }),
     { success: 'Filial qo‘shildi', onDone: async (b) => { setAdding(null); setBrMenu(false); await refresh(); setBranch(b.id); } });
+  const [ren, setRen] = useState<{ id: string; name: string } | null>(null);
+  const renBranch = useAction(({ id, name }: { id: string; name: string }) => db.update('branches', id, { name }),
+    { success: 'Filial nomi o‘zgartirildi', onDone: async () => { setRen(null); await refresh(); } });
   const [menu, setMenu] = useState(false);
   const [brMenu, setBrMenu] = useState(false);
   const [quick, setQuick] = useState<'queue' | 'reminders' | null>(null);
@@ -55,7 +58,7 @@ export function Header() {
     <header className="sticky top-0 z-40 border-b border-line bg-white">
       <div className="flex min-h-11 flex-wrap items-center gap-x-2.5 gap-y-1 px-4">
         <div ref={brRef} className="relative">
-          <button type="button" onClick={() => { setBrMenu(!brMenu); setAdding(null); }} aria-haspopup="menu" aria-expanded={brMenu} aria-label="Filialni tanlash" title="Filialni tanlash"
+          <button type="button" onClick={() => { setBrMenu(!brMenu); setAdding(null); setRen(null); }} aria-haspopup="menu" aria-expanded={brMenu} aria-label="Filialni tanlash" title="Filialni tanlash"
             className={cx('flex h-8 items-center gap-1.5 rounded-full pr-2 pl-[3px]', brMenu ? 'bg-[#e6f6fc]' : 'hover:bg-muted')}>
             <span className="grid h-[26px] w-[26px] place-items-center rounded-full bg-primary-soft"><Building2 size={15} className="text-primary" /></span>
             <span className="max-w-[150px] truncate text-[13px] font-semibold">{branch?.name}</span>
@@ -70,13 +73,30 @@ export function Header() {
               <div className="flex flex-col p-1.5">
                 {branches.map((b, i) => {
                   const on = b.id === branch?.id;
+                  if (ren?.id === b.id) return (
+                    <form key={b.id} className="flex items-center gap-1.5 px-1 py-1" onSubmit={(e) => { e.preventDefault(); const n = ren.name.trim(); if (n && n !== b.name) renBranch.mutate({ id: b.id, name: n }); else setRen(null); }}>
+                      <input autoFocus aria-label="Filial nomi" value={ren.name} onChange={(e) => setRen({ id: b.id, name: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setRen(null); } }}
+                        className="h-9 min-w-0 flex-1 rounded-lg border border-primary px-2.5 text-sm focus:outline-none" />
+                      <button type="submit" aria-label="Saqlash" title="Saqlash" disabled={!ren.name.trim() || renBranch.isPending}
+                        className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-primary text-white disabled:opacity-50"><Check size={16} /></button>
+                      <button type="button" aria-label="Bekor qilish" title="Bekor qilish" onClick={() => setRen(null)}
+                        className="grid h-9 w-9 flex-none place-items-center rounded-lg border border-line text-sub"><X size={16} /></button>
+                    </form>
+                  );
                   return (
-                    <button key={b.id} type="button" role="menuitemradio" aria-checked={on} onClick={() => { setBranch(b.id); setBrMenu(false); }}
-                      className={cx('flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm', on ? 'bg-[#e6f6fc] font-semibold' : 'hover:bg-muted')}>
-                      <span className="h-2.5 w-2.5 flex-none rounded-full" style={{ background: BR_DOTS[i % BR_DOTS.length] }} />
-                      <span className="flex-1 truncate">{b.name}</span>
-                      {on && <Check size={16} className="text-primary" />}
-                    </button>
+                    <div key={b.id} className={cx('group flex min-h-10 items-center rounded-lg', on ? 'bg-[#e6f6fc]' : 'hover:bg-muted')}>
+                      <button type="button" role="menuitemradio" aria-checked={on} onClick={() => { setBranch(b.id); setBrMenu(false); }}
+                        className={cx('flex min-h-10 min-w-0 flex-1 items-center gap-2.5 px-2.5 text-left text-sm', on && 'font-semibold')}>
+                        <span className="h-2.5 w-2.5 flex-none rounded-full" style={{ background: BR_DOTS[i % BR_DOTS.length] }} />
+                        <span className="flex-1 truncate">{b.name}</span>
+                        {on && <Check size={16} className="text-primary" />}
+                      </button>
+                      {can('settings.edit') && (
+                        <button type="button" aria-label={`${b.name} nomini tahrirlash`} title="Nomini tahrirlash" onClick={() => { setRen({ id: b.id, name: b.name }); setAdding(null); }}
+                          className="mr-1 grid h-8 w-8 flex-none place-items-center rounded-md text-sub hover:bg-white hover:text-primary"><Pencil size={14} /></button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -150,12 +170,6 @@ export function Header() {
           )}
         </div>
       </div>
-      {branch && path !== '/ai' && (
-        <Link to="/ai" aria-label="AI yordamchi" title="AI yordamchi"
-          className="fixed right-6 bottom-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-primary !text-white no-underline shadow-pop hover:bg-primary-hover">
-          <Sparkles size={24} />
-        </Link>
-      )}
     </header>
   );
 }
