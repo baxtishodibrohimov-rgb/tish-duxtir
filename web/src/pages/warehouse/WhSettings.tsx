@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
-import { Check, X, ChevronDown, ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2, Archive, Download } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, X, ChevronDown, ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2, Archive, Download, Image as ImageIcon, Upload } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
 import { initials, qty as fq } from '@/lib/format';
 import type { Brand, CalcCard, Counterparty, PriceItem, Product, ProductCategory, ProductWhSetting, Warehouse } from '@/lib/types';
 import { CounterpartyForm } from '@/components/CounterpartyForm';
+import { ProductThumb, productImageUrl } from '@/components/ProductThumb';
 import { Button, Card, Confirm, Empty, Field, Input, Modal, Select, Switch, Textarea, UnderTabs, cx } from '@/components/ui';
 import type { WhCtx } from './common';
 import { downloadCsv } from './Docs';
@@ -210,7 +211,7 @@ function Products({ wh }: { wh: WhCtx }) {
               {rows.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-sub">Bu toifada tovar yo‘q.</td></tr>}
               {rows.map((p) => (
                 <tr key={p.id} className={cx('border-t border-line hover:bg-surface', p.archived && 'opacity-50')}>
-                  <td className="px-2 py-2 font-medium">{p.name}</td>
+                  <td className="px-2 py-2 font-medium"><span className="flex items-center gap-2"><ProductThumb id={p.id} path={p.image_path} size={28} />{p.name}</span></td>
                   <td className="px-2 py-2">{wh.brandMap.get(p.brand_id ?? '')?.name}</td>
                   <td className="px-2 py-2 text-sub">{p.sku}</td>
                   <td className="px-2 py-2 text-sub">{p.barcode}</td>
@@ -274,11 +275,22 @@ export function ProductModal({ wh, p, defCat, onClose, initialName, onSaved }: {
     }
     return o;
   });
+  // Rasm: tanlangan fayl tovar saqlangandan keyin yuklanadi (yangi tovarda id hali yo'q).
+  const [img, setImg] = useState<File | null>(null);
+  const [dropImg, setDropImg] = useState(false);
+  const preview = useMemo(() => (img ? URL.createObjectURL(img) : null), [img]);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  const curImg = dropImg ? null : productImageUrl(p?.id ?? '', p?.image_path);
   const save = useAction(async () => {
     if (!f.name.trim()) throw new Error('Tovar nomini kiriting');
     const row = { ...f, category_id: f.category_id || null, brand_id: f.brand_id || null, pack_unit: f.pack_unit || null, pack_qty: f.pack_unit ? Number(f.pack_qty) || 1 : 1 };
     const saved = p ? await db.update<Product>('products', p.id, row) : await db.insert<Product>('products', row);
     await db.insertMany('product_wh_settings', Object.values(lim).map((s) => ({ product_id: saved.id, warehouse_id: s.warehouse_id, visible: s.visible, min_qty: Number(s.min_qty) || 0, order_qty: Number(s.order_qty) || 0, location: s.location || null })));
+    if (img) {
+      const fd = new FormData(); fd.append('file', img);
+      const r = await http.post<{ image_path: string }>(`/api/products/${saved.id}/image`, fd);
+      saved.image_path = r.image_path;
+    } else if (dropImg && p?.image_path) await http.del(`/api/products/${saved.id}/image`);
     return saved;
   }, { invalidate: ['products', 'product_wh_settings', 'stock'], success: 'Saqlandi', onDone: (saved) => { onSaved?.(saved); onClose(); } });
   const setL = (w: string, patch: Partial<ProductWhSetting>) => setLim({ ...lim, [w]: { ...lim[w]!, ...patch } });
@@ -291,6 +303,20 @@ export function ProductModal({ wh, p, defCat, onClose, initialName, onSaved }: {
       <div className="grid gap-5 md:grid-cols-2">
         <div className="flex flex-col gap-3">
           <Field label="Toifa">{(id) => <Select id={id} value={f.category_id} onChange={(e) => setF({ ...f, category_id: e.target.value })}><option value="">—</option>{catOpts(null).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</Select>}</Field>
+          <div className="flex items-center gap-3">
+            <span className="grid h-[88px] w-[88px] flex-none place-items-center overflow-hidden rounded-xl border border-line bg-muted">
+              {preview || curImg ? <img src={preview ?? curImg!} alt="Tovar rasmi" className="h-full w-full object-cover" /> : <ImageIcon size={30} className="text-[#b6c0ca]" />}
+            </span>
+            <span className="flex flex-col items-start gap-1.5">
+              <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-sm hover:bg-muted">
+                <Upload size={15} /> {preview || curImg ? 'Rasmni almashtirish' : 'Rasm yuklash'}
+                <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="sr-only"
+                  onChange={(e) => { const file = e.target.files?.[0]; if (file) { setImg(file); setDropImg(false); } e.target.value = ''; }} />
+              </label>
+              {(preview || curImg) && <button type="button" onClick={() => { setImg(null); setDropImg(!!p?.image_path); }} className="text-xs text-bad">Rasmni olib tashlash</button>}
+              <span className="text-xs text-sub">«Material xarajat»da shifokorga ko‘rinadi</span>
+            </span>
+          </div>
           <Field label="Tovar nomi *">{(id) => <Input id={id} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />}</Field>
           <Field label="Brend">{(id) => newBrand !== null ? (
             <span className="flex gap-1.5">

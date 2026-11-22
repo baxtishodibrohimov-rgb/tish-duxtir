@@ -11,6 +11,7 @@ import { VISIT_STATUS } from '@/lib/visit';
 import type { Act, ActItem, Cashbox, Patient, PriceCategory, PriceItem, RecordFile, Reminder, Room, TreatmentRecord, Visit, Warehouse } from '@/lib/types';
 import { NewPatient } from './NewPatient';
 import { Plans } from '@/components/Plans';
+import { CatIconSvg, WorksWizard } from '@/components/WorksWizard';
 import { VisitModal } from '@/components/VisitModal';
 import { Badge, Button, Card, Confirm, Empty, ErrorBox, Field, Input, Modal, PageLoader, Select, Textarea, cx } from '@/components/ui';
 
@@ -272,19 +273,20 @@ export function ServicePicker({ onPick, onClose, withTooth }: { onPick: (l: { it
 }
 
 // ---------------- Davolash tarixi ----------------
-interface WorkRow { act_id: string; act_date: string; doctor_id: string | null; works: string[]; mats: { name: string; unit: string; qty: number }[] }
+interface WorkRow { act_id: string; act_date: string; doctor_id: string | null; works: string[]; tooth: string | null; mats: { name: string; unit: string; qty: number }[] }
 function HistoryTab({ p }: { p: Patient }) {
   const { can, me, branch, members, memberName } = useOrg();
   const recs = useList<TreatmentRecord>('treatment_records', { patient_id: p.id });
   const [f, setF] = useState({ tooth: '', diagnosis: '', description: '' });
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  const [wiz, setWiz] = useState(false);
   const add = useAction(() => db.insert('treatment_records', { ...f, patient_id: p.id, doctor_id: me.user_id, branch_id: branch.id }),
     { invalidate: ['treatment_records'], success: 'Yozuv qo‘shildi', onDone: () => { setF({ tooth: '', diagnosis: '', description: '' }); setOpen(false); } });
   const del = useAction((id: string) => db.remove('treatment_records', id), { invalidate: ['treatment_records'] });
   const list = (recs.data ?? []).filter((r) => !q || `${r.diagnosis} ${r.description} ${r.tooth}`.toLowerCase().includes(q.toLowerCase()));
   const works = useQuery({ queryKey: ['acts', 'works', p.id], queryFn: () => http.get<WorkRow[]>(`/api/patients/${p.id}/works`) });
-  const wl = (works.data ?? []).filter((w) => !q || `${w.works.join(' ')} ${w.mats.map((m) => m.name).join(' ')}`.toLowerCase().includes(q.toLowerCase()));
+  const wl = (works.data ?? []).filter((w) => !q || `${w.works.join(' ')} ${w.tooth ?? ''} ${w.mats.map((m) => m.name).join(' ')}`.toLowerCase().includes(q.toLowerCase()));
   const byDay = useMemo(() => {
     const m = new Map<string, { recs: TreatmentRecord[]; works: WorkRow[] }>();
     const get = (k: string) => { const v = m.get(k) ?? { recs: [], works: [] }; m.set(k, v); return v; };
@@ -301,8 +303,14 @@ function HistoryTab({ p }: { p: Patient }) {
           <label htmlFor="hs" className="sr-only">Qidirish</label>
           <input id="hs" type="search" placeholder="Qidirish" value={q} onChange={(e) => setQ(e.target.value)} className="h-10 w-full rounded-[10px] border border-line bg-white pr-3 pl-9 text-sm" />
         </div>
-        {can('patients.edit') && <button type="button" onClick={() => setOpen(!open)} className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-primary px-4 text-sm font-medium text-white"><Plus size={16} />Yangi yozuv</button>}
+        {can('patients.edit') && (
+          <span className="flex flex-wrap gap-2">
+            {can('patients.edit', branch.id) && <button type="button" onClick={() => setWiz(true)} className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-primary bg-[#f2fbff] px-4 text-sm font-medium text-primary-hover"><CatIconSvg icon="tooth" size={16} />Material xarajat</button>}
+            <button type="button" onClick={() => setOpen(!open)} className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-primary px-4 text-sm font-medium text-white"><Plus size={16} />Yangi yozuv</button>
+          </span>
+        )}
       </div>
+      {wiz && <WorksWizard patient={p} branchId={branch.id} onClose={() => setWiz(false)} />}
       {open && (
         <section className="flex flex-col gap-2 rounded-2xl border border-line bg-white p-4">
           <div className="grid grid-cols-[100px_1fr] gap-2">
@@ -328,12 +336,13 @@ function HistoryTab({ p }: { p: Patient }) {
                 <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-base font-semibold">{w.works.join(', ') || 'Ish'}</span>
-                    <span className="rounded-full bg-ok-soft px-2 py-0.5 text-xs font-medium text-[#166534]">Bajarilgan ish</span>
+                    {w.tooth && <span className="rounded-full bg-[#e6f6fc] px-2 py-0.5 text-xs font-semibold text-[#075985]">🦷 {w.tooth}</span>}
+                    <span className="rounded-full bg-ok-soft px-2 py-0.5 text-xs font-medium text-[#166534]">Material xarajat</span>
                   </div>
                   <span className="text-xs text-sub"><span style={{ color: color(w.doctor_id) }}>{memberName(w.doctor_id)}</span> · {dmy(w.act_date)}</span>
                   {w.mats.length > 0 && (
                     <div className="flex flex-col overflow-hidden rounded-[10px] border border-muted">
-                      <span className="bg-surface px-3 py-1.5 text-xs font-semibold text-sub">Ishlatilgan materiallar · ombordan chiqarildi</span>
+                      <span className="bg-surface px-3 py-1.5 text-xs font-semibold text-sub">Material xarajat · ombordan chiqarildi</span>
                       {w.mats.map((m) => <div key={m.name} className="flex justify-between gap-3 border-t border-muted px-3 py-1.5 text-sm"><span>{m.name}</span><b className="font-semibold tabular-nums">{money(m.qty)} {m.unit}</b></div>)}
                     </div>
                   )}

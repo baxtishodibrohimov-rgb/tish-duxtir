@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Menu, Palette, Pencil, Plus, Trash2, User, Users, Tag, ListOrdered, Building2, CalendarDays, Banknote, BookOpen } from 'lucide-react';
 import { CAT_ICONS, CatIconSvg } from '@/components/WorksWizard';
+import { WorkMaterials } from '@/components/WorkMaterials';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOrg, ROLE_LABEL, ALL_PERMS, roleDefault } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
-import { dmy, hm, initials, isoDate, phoneFmt, qty as fq } from '@/lib/format';
+import { dmy, hm, initials, isoDate, phoneFmt } from '@/lib/format';
 import { useQueryParam, useTitle } from '@/lib/router';
-import type { Branch, CalcCard, CatIcon, Member, PatientStatus, Perm, PriceCategory, PriceItem, Product, Role, Room } from '@/lib/types';
+import type { Brand, Branch, CalcCard, CatIcon, WorkMatGroup, Member, PatientStatus, Perm, PriceCategory, PriceItem, Product, Role, Room } from '@/lib/types';
 import { Badge, Button, Card, Confirm, Empty, Field, Input, Modal, Select, Switch, Toggle, cx } from '@/components/ui';
 
 type Tab = 'profile' | 'clinic' | 'staff' | 'schedule' | 'price' | 'works' | 'salary' | 'statuses' | 'dicts';
@@ -234,6 +235,11 @@ function Works() {
   const items = useList<PriceItem>('price_items', { archived: false });
   const cards = useList<CalcCard>('calc_cards');
   const products = useList<Product>('products', { archived: false });
+  const brands = useList<Brand>('brands');
+  const groups = useList<WorkMatGroup>('work_mat_groups');
+  const [renCat, setRenCat] = useState<{ id: string; name: string } | null>(null);
+  const renameCat = useAction(({ id, name }: { id: string; name: string }) => db.update('price_categories', id, { name }), { invalidate: ['price_categories'], onDone: () => setRenCat(null) });
+  const setTeeth = useAction(({ id, on }: { id: string; on: boolean }) => db.update('price_categories', id, { ask_teeth: on }), { invalidate: ['price_categories'] });
   const [catId, setCatId] = useState<string | null>(null);
   const [workId, setWorkId] = useState<string | null>(null);
   const [nc, setNc] = useState('');
@@ -241,8 +247,6 @@ function Works() {
   const cat = cats.data?.find((c) => c.id === catId) ?? cats.data?.[0];
   const works = (items.data ?? []).filter((i) => i.category_id === cat?.id);
   const work = works.find((w) => w.id === workId) ?? works[0];
-  const mats = (cards.data ?? []).filter((c) => c.price_item_id === work?.id);
-  const pm = byId(products.data);
   const addCat = useAction(() => db.insert<PriceCategory>('price_categories', { name: nc.trim(), position: cats.data?.length ?? 0, color_idx: (cats.data?.length ?? 0) % 6 }),
     { invalidate: ['price_categories'], onDone: (c) => { setNc(''); setCatId(c.id); setWorkId(null); } });
   const setIcon = useAction(({ id, icon }: { id: string; icon: CatIcon }) => db.update('price_categories', id, { icon }), { invalidate: ['price_categories'] });
@@ -250,9 +254,6 @@ function Works() {
   const addWork = useAction(() => db.insert<PriceItem>('price_items', { category_id: cat!.id, name: nw.trim(), price: 0, position: works.length }),
     { invalidate: ['price_items'], onDone: (w) => { setNw(''); setWorkId(w.id); } });
   const delWork = useAction((id: string) => db.update('price_items', id, { archived: true }), { invalidate: ['price_items'] });
-  const addMat = useAction((pid: string) => db.insert('calc_cards', { price_item_id: work!.id, product_id: pid, qty: 1 }), { invalidate: ['calc_cards'] });
-  const setQty = useAction(({ id, qty }: { id: string; qty: number }) => db.update('calc_cards', id, { qty }), { invalidate: ['calc_cards'] });
-  const delMat = useAction((id: string) => db.remove('calc_cards', id), { invalidate: ['calc_cards'] });
   const row = (on: boolean) => cx('flex items-center gap-1 rounded-lg', on ? 'bg-[#e6f6fc] font-semibold text-primary-hover' : 'text-fg');
   const H = 'px-1.5 pb-1.5 text-xs font-semibold tracking-[.04em] text-sub uppercase';
   const IN = 'h-9 min-w-0 flex-1 rounded-md border border-line px-2.5 text-sm';
@@ -261,16 +262,25 @@ function Works() {
     <div className="flex max-w-[1380px] flex-col gap-3">
       <div className="flex flex-col gap-1">
         <h2 className="m-0 text-lg font-semibold">Bajarilgan ish</h2>
-        <span className="text-sm text-sub">Kategoriya va ishlarni kiriting, har bir ishga ombordagi kerakli materiallar va odatdagi miqdorini biriktiring. Shifokor jadvalda «Bajarilgan ish»ni ochganda shu ro‘yxat chiqadi. Ishlar Praysdagi xizmatlar bilan bir xil — narxi Prays bo‘limida.</span>
+        <span className="text-sm text-sub">Kategoriya va ishlarni kiriting, har bir ishga ombordagi kerakli materiallar va odatdagi miqdorini biriktiring. Shifokor «Material xarajat»ni ochganda shu ro‘yxat chiqadi. Ishlar Praysdagi xizmatlar bilan bir xil — narxi Prays bo‘limida.</span>
       </div>
       <div className="flex flex-wrap overflow-hidden rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04)]">
         <section aria-label="Kategoriyalar" className="flex flex-[1_1_220px] flex-col gap-1 border-r border-line p-3.5">
           <span className={H}>Kategoriyalar</span>
           {(cats.data ?? []).map((c) => (
             <div key={c.id} className={row(c.id === cat?.id)}>
-              <button type="button" onClick={() => { setCatId(c.id); setWorkId(null); }} className="flex min-h-10 flex-1 items-center gap-2 px-2.5 text-left text-sm">
-                <CatIconSvg icon={c.icon} size={16} />{c.name} <span className="text-xs font-normal text-sub">· {(items.data ?? []).filter((i) => i.category_id === c.id).length}</span>
-              </button>
+              {renCat?.id === c.id ? (
+                <form className="flex flex-1 gap-1 p-1" onSubmit={(e) => { e.preventDefault(); if (renCat.name.trim()) renameCat.mutate({ id: c.id, name: renCat.name.trim() }); }}>
+                  <input autoFocus aria-label="Kategoriya nomi" value={renCat.name} onChange={(e) => setRenCat({ id: c.id, name: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === 'Escape') setRenCat(null); }} className="h-8 min-w-0 flex-1 rounded-md border border-primary px-2 text-sm font-normal text-fg" />
+                  <button type="submit" className="h-8 rounded-md bg-primary px-2 text-xs text-white">OK</button>
+                </form>
+              ) : (
+                <button type="button" onClick={() => { setCatId(c.id); setWorkId(null); }} className="flex min-h-10 flex-1 items-center gap-2 px-2.5 text-left text-sm">
+                  <CatIconSvg icon={c.icon} size={16} />{c.name} <span className="text-xs font-normal text-sub">· {(items.data ?? []).filter((i) => i.category_id === c.id).length}</span>
+                </button>
+              )}
+              {renCat?.id !== c.id && <button type="button" onClick={() => setRenCat({ id: c.id, name: c.name })} aria-label={`${c.name}: nomini tahrirlash`} title="Nomini tahrirlash" className="grid h-8 w-8 place-items-center rounded-md text-faint hover:text-primary"><Pencil size={14} /></button>}
               <button type="button" onClick={() => delCat.mutate(c.id)} aria-label="Kategoriyani o‘chirish" title="O‘chirish" className="grid h-8 w-8 place-items-center rounded-md text-faint hover:text-bad"><Trash2 size={15} /></button>
             </div>
           ))}
@@ -279,6 +289,12 @@ function Works() {
             <input id="wsNc" placeholder="Yangi kategoriya" value={nc} onChange={(e) => setNc(e.target.value)} className={IN} />
             <button type="submit" aria-label="Kategoriya qo‘shish" disabled={!nc.trim()} className={PLUS}>+</button>
           </form>
+          {cat && (
+            <label className="mt-3 flex items-start gap-2.5 rounded-lg bg-surface p-2.5 text-sm">
+              <Toggle on={cat.ask_teeth} label="Tish formulasi so‘ralsin" onChange={(v) => setTeeth.mutate({ id: cat.id, on: v })} />
+              <span><b className="font-medium">Tish formulasi</b><br /><span className="text-xs text-sub">«{cat.name}» tanlanganda shifokordan tishlar so‘ralsin</span></span>
+            </label>
+          )}
           {cat && (
             <div className="mt-2 flex flex-wrap gap-1" role="radiogroup" aria-label="Kategoriya belgisi">
               {CAT_ICONS.map((i) => (
@@ -307,34 +323,10 @@ function Works() {
             </form>
           )}
         </section>
-        <section aria-label="Materiallar" className="flex flex-[2_1_380px] flex-col gap-2 px-[18px] py-3.5">
-          <span className="text-xs font-semibold tracking-[.04em] text-sub uppercase">{work?.name ?? 'Ish'} — kerakli materiallar</span>
-          {!work ? <span className="py-6 text-sm text-sub">Avval ish qo‘shing yoki tanlang.</span> : <>
-            <div className="flex flex-col overflow-hidden rounded-[10px] border border-line">
-              {mats.length === 0 && <span className="p-4 text-sm text-sub">Bu ishga hali material biriktirilmagan.</span>}
-              {mats.map((m) => {
-                const p = pm.get(m.product_id);
-                return (
-                  <div key={m.id} className="flex flex-wrap items-center gap-2.5 border-t border-muted py-1.5 pr-2 pl-3.5 first:border-t-0">
-                    <span className="flex-[1_1_160px] text-sm">{p?.name ?? '—'}</span>
-                    <span className="inline-flex items-center overflow-hidden rounded-lg border border-line">
-                      <button type="button" onClick={() => setQty.mutate({ id: m.id, qty: Math.max(m.qty % 1 ? m.qty / 2 : 1, m.qty - 1) })} aria-label="Kamaytirish" className="h-9 w-9 bg-surface text-lg">−</button>
-                      <span className="min-w-20 text-center font-semibold tabular-nums">{fq(m.qty)} {p?.unit}</span>
-                      <button type="button" onClick={() => setQty.mutate({ id: m.id, qty: m.qty + 1 })} aria-label="Ko‘paytirish" className="h-9 w-9 bg-surface text-lg">+</button>
-                    </span>
-                    <button type="button" onClick={() => delMat.mutate(m.id)} aria-label="Materialni o‘chirish" title="O‘chirish" className="grid h-9 w-9 place-items-center rounded-md text-[#b91c1c]"><Trash2 size={16} /></button>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="flex items-center gap-2">
-              <label htmlFor="wsAdd" className="text-[13px] text-sub">Material qo‘shish:</label>
-              <select id="wsAdd" value="" onChange={(e) => e.target.value && addMat.mutate(e.target.value)} className="h-9 max-w-[340px] flex-1 rounded-md border border-line bg-white px-2 text-sm">
-                <option value="">Ombordan tanlang…</option>
-                {(products.data ?? []).filter((p) => !mats.some((m) => m.product_id === p.id)).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}
-              </select>
-            </div>
-          </>}
+        <section aria-label="Materiallar" className="flex flex-[2_1_420px] flex-col gap-2 px-[18px] py-3.5">
+          <span className="text-xs font-semibold tracking-[.04em] text-sub uppercase">{work?.name ?? 'Ish'} — materiallar</span>
+          {!work ? <span className="py-6 text-sm text-sub">Avval ish qo‘shing yoki tanlang.</span>
+            : <WorkMaterials work={work} allWorks={items.data ?? []} products={products.data ?? []} brands={brands.data ?? []} cards={cards.data ?? []} groups={groups.data ?? []} />}
         </section>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { Package, Recycle, Move, List as ListIcon, Minus, Plus, X, ChevronDown, 
 import { db, http } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
 import { toast } from 'sonner';
+import { productImageUrl } from '@/components/ProductThumb';
 import { dmyhm, money } from '@/lib/format';
 import { navigate } from '@/lib/router';
 import type { Product, StockDoc, StockHistoryRow } from '@/lib/types';
@@ -132,7 +133,8 @@ export function Stock({ wh }: { wh: WhCtx }) {
                   <div className="flex h-[26px] items-center px-3 text-[13px] font-semibold text-white" style={{ background: barColor }}>{bar}</div>
                   {inCart > 0 && <span className="absolute top-9 right-2 rounded-full bg-bad px-2.5 py-1 text-sm font-bold text-white shadow">−{inCart}</span>}
                   <button type="button" onClick={() => setHist(p)} aria-label={`${p.name}: tovar tarixi`} className="grid h-[170px] w-full place-items-center">
-                    <Package size={88} strokeWidth={1.4} className={st === 'out' ? 'text-[#e5c4c4]' : 'text-[#c3ccd5]'} />
+                    {p.image_path ? <img src={productImageUrl(p.id, p.image_path)!} alt="" loading="lazy" className={cx('h-[150px] w-[90%] object-contain', st === 'out' && 'opacity-60')} />
+                      : <Package size={88} strokeWidth={1.4} className={st === 'out' ? 'text-[#e5c4c4]' : 'text-[#c3ccd5]'} />}
                   </button>
                   <div className="flex flex-1 flex-col gap-1 px-3 pb-3">
                     <div className={cx('self-end font-semibold', st === 'out' ? 'text-lg text-bad' : st === 'low' ? 'text-[15px] text-warn' : 'text-[15px] text-primary-hover')}>{qtyText}</div>

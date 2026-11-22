@@ -2,6 +2,7 @@ import { forwardRef, useMemo, useState } from 'react';
 import { Check, Plus, Search } from 'lucide-react';
 import type { Product } from '@/lib/types';
 import { cx } from '@/components/ui';
+import { fold } from '@/lib/format';
 import { fmtQty, type WhCtx } from './common';
 
 /**
@@ -17,13 +18,13 @@ export const ProductSearch = forwardRef<HTMLInputElement, {
   const [hi, setHi] = useState(0);
 
   const found = useMemo(() => {
-    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const words = fold(q.trim()).split(/\s+/).filter(Boolean);
     if (!words.length) return [];
     return wh.products.filter((p) => {
       if (p.archived) return false;
-      const hay = `${p.name} ${wh.brandMap.get(p.brand_id ?? '')?.name ?? ''} ${p.sku ?? ''} ${p.barcode ?? ''}`.toLowerCase();
+      const hay = fold(`${p.name} ${wh.brandMap.get(p.brand_id ?? '')?.name ?? ''} ${p.sku ?? ''} ${p.barcode ?? ''}`);
       return words.every((w) => hay.includes(w));
-    }).sort((a, b) => Number(b.name.toLowerCase().startsWith(words[0]!)) - Number(a.name.toLowerCase().startsWith(words[0]!)) || a.name.localeCompare(b.name, 'uz')).slice(0, 30);
+    }).sort((a, b) => Number(fold(b.name).startsWith(words[0]!)) - Number(fold(a.name).startsWith(words[0]!)) || a.name.localeCompare(b.name, 'uz')).slice(0, 30);
   }, [q, wh.products, wh.brandMap]);
   const total = found.length + (q.trim() ? 1 : 0); // oxirgisi — «Yangi tovar»
 

@@ -63,3 +63,8 @@ export const phoneMask = (d: string) => {
 export const phoneDigits = (s: string) => s.replace(/\D/g, '').replace(/^998/, '').slice(0, 9);
 /** Saqlangan raqam -> +998(90)123-45-67 */
 export const phoneShow = (p: string | null | undefined) => (p ? phoneMask(phoneDigits(p)) : '');
+
+/** Qidiruv uchun: kichik harf va o'zbekcha apostroflar (‘ ’ ʻ ʼ ` ') bir xil. */
+export function fold(s: string | null | undefined) {
+  return (s ?? '').toLowerCase().replace(/[‘’ʻʼ`´]/g, "'");
+}

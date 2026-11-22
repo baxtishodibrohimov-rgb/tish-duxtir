@@ -347,7 +347,7 @@ export function Schedule() {
           </div>
         </div>
       )}
-      {works && pmap.get(works.patient_id) && <WorksWizard visit={works} patient={pmap.get(works.patient_id)!} onClose={() => setWorks(null)} />}
+      {works && pmap.get(works.patient_id) && <WorksWizard visit={works} patient={pmap.get(works.patient_id)!} branchId={works.branch_id} onClose={() => setWorks(null)} />}
     </div>
   );
 }
@@ -421,7 +421,7 @@ function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy, onWorks 
       </div>
       {can('patients.edit', branch.id) && (
         <button type="button" onClick={onWorks} className="flex min-h-9 w-full items-center gap-2 rounded-md border border-dashed border-primary bg-[#f2fbff] px-2.5 text-[13px] font-semibold text-primary-hover">
-          <CatIconSvg icon="tooth" size={16} /> Bajarilgan ish
+          <CatIconSvg icon="tooth" size={16} /> Material xarajat
           <span className="ml-auto text-xs font-normal text-sub">{acts.data?.length ? `${acts.data.length} ta yozuv` : 'materiallarni yozish'}</span>
         </button>
       )}

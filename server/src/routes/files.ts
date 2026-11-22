@@ -46,6 +46,50 @@ export async function fileRoutes(app: FastifyInstance) {
     } catch (e) { fs.rmSync(abs, { force: true }); throw e; }
   });
 
+  // Tovar rasmi (Ombor → tovar oynasidan yuklanadi, "Material xarajat"da ko'rinadi).
+  app.post<{ Params: { id: string } }>('/api/products/:id/image', async (req) => {
+    const m = requireMember(req);
+    if (!can(m, 'warehouse.admin')) throw forbidden();
+    const prod = await one<any>(pool, 'select id, image_path from products where id = $1 and org_id = $2', [req.params.id, m.org_id]);
+    if (!prod) throw notFound('Tovar topilmadi');
+    const part = await req.file();
+    if (!part) throw bad('Fayl yo‘q');
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(part.mimetype)) throw bad('Faqat rasm (JPG, PNG, WEBP) yuklash mumkin');
+    const ext = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' }[part.mimetype] ?? '';
+    const rel = path.join(m.org_id, 'products', `${crypto.randomUUID()}${ext}`);
+    const abs = path.join(config.filesDir, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    await pipeline(part.file, fs.createWriteStream(abs));
+    if (part.file.truncated) { fs.rmSync(abs, { force: true }); throw bad(`Fayl ${config.maxUploadMb} MB dan katta`); }
+    try {
+      await tx(m.user_id, (c) => c.query('update products set image_path = $2, image_mime = $3 where id = $1', [prod.id, rel, part.mimetype]));
+    } catch (e) { fs.rmSync(abs, { force: true }); throw e; }
+    if (prod.image_path) fs.rmSync(path.join(config.filesDir, prod.image_path), { force: true });
+    return { ok: true, image_path: rel };
+  });
+
+  app.get<{ Params: { id: string } }>('/api/products/:id/image', async (req, reply) => {
+    const m = requireMember(req);
+    const prod = await one<any>(pool, 'select image_path, image_mime from products where id = $1 and org_id = $2', [req.params.id, m.org_id]);
+    if (!prod?.image_path) throw notFound('Rasm yo‘q');
+    const abs = path.join(config.filesDir, prod.image_path);
+    if (!abs.startsWith(config.filesDir + path.sep) || !fs.existsSync(abs)) throw notFound('Rasm serverda topilmadi');
+    reply.header('content-type', prod.image_mime || 'image/jpeg');
+    reply.header('cache-control', 'private, max-age=86400');
+    reply.header('x-content-type-options', 'nosniff');
+    return reply.send(fs.createReadStream(abs));
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/products/:id/image', async (req) => {
+    const m = requireMember(req);
+    if (!can(m, 'warehouse.admin')) throw forbidden();
+    const prod = await tx(m.user_id, (c) => one<any>(c, `update products p set image_path = null, image_mime = null from (select image_path old from products where id = $1 and org_id = $2) o
+                                                           where p.id = $1 and p.org_id = $2 returning o.old`, [req.params.id, m.org_id]));
+    if (!prod) throw notFound();
+    if (prod.old) fs.rmSync(path.join(config.filesDir, prod.old), { force: true });
+    return { ok: true };
+  });
+
   app.get<{ Params: { id: string } }>('/api/files/:id', async (req, reply) => {
     const m = requireMember(req);
     if (!can(m, 'patients.view')) throw forbidden();

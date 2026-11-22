@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
-import { CheckCircle2, X, Plus, Trash2, Check } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { CheckCircle2, X, Check, ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { http } from '@/lib/api';
-import { useAction, useList, byId } from '@/lib/hooks';
+import { useAction } from '@/lib/hooks';
 import { dmy, qty as fq } from '@/lib/format';
 import { Link } from '@/lib/router';
-import type { CalcCard, CatIcon, Patient, PriceCategory, PriceItem, Product, StockBalance, Visit, Warehouse } from '@/lib/types';
-import { cx } from './ui';
+import type { CatIcon, Patient, Visit } from '@/lib/types';
+import { ProductThumb } from './ProductThumb';
+import { PageLoader, cx } from './ui';
 
 /** Prays kategoriyasi belgisi (maketdagi chiziqli belgilar). */
 const ICON_PATHS: Record<CatIcon, string[]> = {
@@ -32,90 +34,119 @@ const TINT: [string, string][] = [['#e6f6fc', '#0086b8'], ['#dcfce7', '#15803d']
 const CARD = (on: boolean) => cx('flex min-h-[150px] flex-col items-stretch gap-2.5 rounded-[14px] p-[18px] text-left shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]',
   on ? 'border-2 border-primary bg-[#f2fbff]' : 'border border-line bg-white');
 
-/** Jadvaldagi qabul uchun "Bajarilgan ish": kategoriya → ish → materiallar, so'ng qabul qilish. */
-export function WorksWizard({ visit, patient, onClose }: { visit: Visit; patient: Patient; onClose: () => void }) {
-  const { memberName } = useOrg();
-  const cats = useList<PriceCategory>('price_categories');
-  const items = useList<PriceItem>('price_items', { archived: false });
-  const cards = useList<CalcCard>('calc_cards');
-  const products = useList<Product>('products', { archived: false });
-  const whs = useList<Warehouse>('warehouses', { branch_id: visit.branch_id, archived: false });
-  const wh = whs.data?.find((w) => w.is_main) ?? whs.data?.[0];
-  const bal = useList<StockBalance>('stock_balances', { warehouse_id: wh?.id ?? '' }, { enabled: !!wh });
-  const pm = byId(products.data);
-  const stockOf = (pid: string) => bal.data?.find((b) => b.product_id === pid)?.qty ?? 0;
+// ---- Tish formulasi (FDI)
+const ADULT = [[18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28], [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38]];
+const CHILD = [[55, 54, 53, 52, 51, 61, 62, 63, 64, 65], [85, 84, 83, 82, 81, 71, 72, 73, 74, 75]];
 
-  const [step, setStep] = useState<'cats' | 'works' | 'mats'>('cats');
+interface CatRow { id: string; name: string; icon: CatIcon; ask_teeth: boolean }
+interface ItemRow { id: string; category_id: string | null; name: string; price: number }
+interface GroupRow { id: string; price_item_id: string; name: string; position: number }
+interface CardRow { price_item_id: string; product_id: string; qty: number; group_id: string | null; position: number }
+interface ProdRow { id: string; name: string; unit: string; brand: string | null; image_path: string | null; qty: number }
+interface Catalog { warehouse_id: string | null; cats: CatRow[]; items: ItemRow[]; groups: GroupRow[]; cards: CardRow[]; products: ProdRow[] }
+type Step = 'cats' | 'teeth' | 'works' | 'mats' | 'sum';
+
+/** Tanlangan tishlar matni: hammasi bo'lsa — "Barcha tishlar", aks holda tartiblangan raqamlar. */
+function teethText(sel: Set<number>) {
+  if (!sel.size) return '';
+  const all = (rows: number[][]) => rows.flat().every((t) => sel.has(t)) && [...sel].every((t) => rows.flat().includes(t));
+  if (all(ADULT)) return 'Barcha tishlar';
+  if (all(CHILD)) return 'Barcha sut tishlari';
+  return [...sel].sort((a, b) => a - b).join(', ');
+}
+
+/**
+ * "Material xarajat": kategoriya → (tish formulasi) → ish → material guruhlari birin-ketin → yakun.
+ * Tasdiqlanganda akt yopiladi, materiallar ombordan chiqadi va bemor davolash tarixiga yoziladi.
+ */
+export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Visit; patient: Patient; branchId: string; onClose: () => void }) {
+  const { memberName, me } = useOrg();
+  const cat_ = useQuery({ queryKey: ['works', 'catalog', branchId], queryFn: () => http.get<Catalog>(`/api/works/catalog?branch_id=${branchId}`) });
+  const c = cat_.data;
+  const pm = useMemo(() => new Map((c?.products ?? []).map((p) => [p.id, p])), [c]);
+
+  const [step, setStep] = useState<Step>('cats');
   const [catId, setCatId] = useState<string | null>(null);
-  const [cur, setCur] = useState<string | null>(null);
-  const [sel, setSel] = useState<string[]>([]);
-  const [used, setUsed] = useState<Record<string, number>>({});      // `${item}|${product}` → miqdor
-  const [extra, setExtra] = useState<Record<string, string[]>>({});  // ish → qo'shimcha materiallar
-  const [done, setDone] = useState<{ works: string; mats: { name: string; q: number; unit: string; left: number }[] } | null>(null);
+  const [child, setChild] = useState(false);
+  const [teeth, setTeeth] = useState<Set<number>>(new Set());
+  const [workId, setWorkId] = useState<string | null>(null);
+  const [gi, setGi] = useState(0);
+  const [used, setUsed] = useState<Record<string, number>>({});
+  const [done, setDone] = useState<{ work: string; tooth: string; mats: { name: string; q: number; unit: string; left: number }[] } | null>(null);
 
-  const catList = cats.data ?? [];
-  const cat = catList.find((c) => c.id === catId) ?? catList[0];
-  const catIdx = Math.max(0, catList.indexOf(cat!));
-  const works = (items.data ?? []).filter((i) => i.category_id === cat?.id);
-  const curItem = items.data?.find((i) => i.id === cur);
-  const selItems = sel.map((id) => items.data?.find((i) => i.id === id)).filter(Boolean) as PriceItem[];
-  const defMats = (itemId: string) => (cards.data ?? []).filter((c) => c.price_item_id === itemId).map((c) => ({ pid: c.product_id, def: c.qty }));
-  const curMats = useMemo(() => {
-    if (!cur) return [];
-    const list = defMats(cur);
-    for (const pid of extra[cur] ?? []) if (!list.some((m) => m.pid === pid)) list.push({ pid, def: 1 });
-    return list.filter((m) => pm.has(m.pid));
-  }, [cur, cards.data, extra, products.data]); // eslint-disable-line react-hooks/exhaustive-deps
-  const totalOf = (pid: string) => Object.entries(used).reduce((a, [k, q]) => a + (k.split('|')[1] === pid && sel.includes(k.split('|')[0]!) ? q : 0), 0);
-  const setU = (k: string, q: number) => { const u = { ...used }; if (q > 0) u[k] = q; else delete u[k]; setUsed(u); };
-  const nUsed = (id: string) => Object.keys(used).filter((k) => k.startsWith(id + '|') && used[k]! > 0).length;
-  const unsel = (id: string) => {
-    setSel(sel.filter((x) => x !== id));
-    setUsed(Object.fromEntries(Object.entries(used).filter(([k]) => !k.startsWith(id + '|'))));
-    if (cur === id) { setCur(null); setStep('works'); }
+  const cat = c?.cats.find((x) => x.id === catId);
+  const works = (c?.items ?? []).filter((i) => i.category_id === catId);
+  const work = c?.items.find((i) => i.id === workId);
+  // Ishning material guruhlari tartib bilan; guruhsizlari oxirida "Boshqa materiallar".
+  const groups = useMemo(() => {
+    if (!c || !workId) return [];
+    const cards = c.cards.filter((x) => x.price_item_id === workId && pm.has(x.product_id)).sort((a, b) => a.position - b.position);
+    const gs = c.groups.filter((g) => g.price_item_id === workId).sort((a, b) => a.position - b.position)
+      .map((g) => ({ id: g.id, name: g.name, cards: cards.filter((x) => x.group_id === g.id) })).filter((g) => g.cards.length);
+    const free = cards.filter((x) => !x.group_id || !gs.some((g) => g.id === x.group_id));
+    if (free.length) gs.push({ id: 'free', name: gs.length ? 'Boshqa materiallar' : 'Materiallar', cards: free });
+    return gs;
+  }, [c, workId, pm]);
+  const grp = groups[gi];
+  const chosen = Object.entries(used).filter(([, q]) => q > 0);
+  const tooth = cat?.ask_teeth ? teethText(teeth) : '';
+
+  const setU = (pid: string, q: number) => { const u = { ...used }; if (q > 0) u[pid] = +q.toFixed(3); else delete u[pid]; setUsed(u); };
+  const pickCat = (id: string) => { const x = c!.cats.find((k) => k.id === id)!; setCatId(id); setWorkId(null); setUsed({}); setStep(x.ask_teeth ? 'teeth' : 'works'); };
+  const pickWork = (id: string) => { if (id !== workId) setUsed({}); setWorkId(id); setGi(0); setStep('mats'); };
+  const toggleTooth = (t: number) => { const s = new Set(teeth); if (s.has(t)) s.delete(t); else s.add(t); setTeeth(s); };
+  const setRows = (rows: number[][]) => { const all = rows.flat().every((t) => teeth.has(t)); const s = new Set(teeth); rows.flat().forEach((t) => (all ? s.delete(t) : s.add(t))); setTeeth(s); };
+  const back = () => {
+    if (step === 'sum') { setStep(groups.length ? 'mats' : 'works'); setGi(Math.max(0, groups.length - 1)); }
+    else if (step === 'mats') { if (gi > 0) setGi(gi - 1); else setStep('works'); }
+    else if (step === 'works') setStep(cat?.ask_teeth ? 'teeth' : 'cats');
+    else if (step === 'teeth') setStep('cats');
   };
-  const matCount = Object.entries(used).filter(([k, q]) => q > 0 && sel.includes(k.split('|')[0]!)).length;
+  const next = () => {
+    if (step === 'teeth') setStep('works');
+    else if (step === 'mats') { if (gi < groups.length - 1) setGi(gi + 1); else setStep('sum'); }
+  };
 
   const accept = useAction(() => {
-    const agg = new Map<string, number>();
-    for (const [k, q] of Object.entries(used)) {
-      const [w, pid] = k.split('|') as [string, string];
-      if (sel.includes(w) && q > 0) agg.set(pid, (agg.get(pid) ?? 0) + q);
-    }
-    return http.post<{ left: { product_id: string; qty: number }[] }>(`/api/visits/${visit.id}/works`, {
-      items: sel, materials: [...agg].map(([product_id, qty]) => ({ product_id, qty })), warehouse_id: wh?.id ?? null,
-    }).then((r) => ({ r, agg }));
+    const body = { items: [workId], tooth: tooth || null, materials: chosen.map(([product_id, qty]) => ({ product_id, qty })), warehouse_id: c?.warehouse_id ?? null };
+    return visit ? http.post<{ left: { product_id: string; qty: number }[] }>(`/api/visits/${visit.id}/works`, body)
+      : http.post<{ left: { product_id: string; qty: number }[] }>(`/api/patients/${patient.id}/works`, { ...body, branch_id: branchId });
   }, {
-    invalidate: ['acts', 'patients', 'visits', 'stock_balances', 'stock_docs', 'stock'],
-    onDone: ({ r, agg }) => setDone({
-      works: selItems.map((i) => i.name).join(', '),
-      mats: [...agg].map(([pid, q]) => ({ name: pm.get(pid)?.name ?? '', q, unit: pm.get(pid)?.unit ?? '', left: r.left.find((x) => x.product_id === pid)?.qty ?? 0 })),
+    invalidate: ['acts', 'patients', 'visits', 'stock_balances', 'stock_docs', 'stock', 'works', 'patient-works'],
+    onDone: (r) => setDone({
+      work: work?.name ?? '', tooth,
+      mats: chosen.map(([pid, q]) => ({ name: pm.get(pid)?.name ?? '', q, unit: pm.get(pid)?.unit ?? '', left: r.left.find((x) => x.product_id === pid)?.qty ?? 0 })),
     }),
   });
-  const reset = () => { setDone(null); setSel([]); setUsed({}); setExtra({}); setStep('cats'); setCur(null); };
-  const crumb = (active: boolean) => cx('rounded-md px-2.5 py-1.5 text-[15px]', active ? 'font-semibold text-fg' : 'text-primary-hover');
+  const reset = () => { setDone(null); setUsed({}); setTeeth(new Set()); setWorkId(null); setCatId(null); setStep('cats'); };
+
+  const crumbs: [string, Step | null][] = [['Kategoriya', 'cats']];
+  if (cat) { if (cat.ask_teeth) crumbs.push([tooth ? `Tish: ${tooth}` : 'Tish formulasi', 'teeth']); crumbs.push([cat.name, 'works']); }
+  if (work) crumbs.push([work.name, 'mats']);
+  if (step === 'sum') crumbs.push(['Yakun', 'sum']);
+  const BTN = 'inline-flex h-11 items-center gap-1.5 rounded-lg px-[18px] text-[15px]';
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Bajarilgan ish" className="fixed inset-0 z-[2000] flex flex-col bg-surface text-fg">
-      <div className="flex items-center gap-3 border-b border-line bg-white px-6 py-3">
+    <div role="dialog" aria-modal="true" aria-label="Material xarajat" className="fixed inset-0 z-[2000] flex flex-col bg-surface text-fg">
+      <div className="flex items-center gap-3 border-b border-line bg-white px-4 py-3 sm:px-6">
         <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[#e6f6fc] text-primary-hover"><CatIconSvg icon="tooth" size={20} /></span>
         <div className="flex min-w-0 flex-1 flex-col">
-          <h2 className="m-0 text-lg font-semibold">Bajarilgan ish</h2>
-          <span className="truncate text-[13px] text-sub">{patient.full_name} · №{patient.card_number} · {memberName(visit.doctor_id)} · {dmy(visit.starts_at)}</span>
+          <h2 className="m-0 text-lg font-semibold">Material xarajat</h2>
+          <span className="truncate text-[13px] text-sub">{patient.full_name}{patient.card_number && ` · №${patient.card_number}`} · {memberName(visit?.doctor_id ?? me.user_id)} · {dmy(visit?.starts_at ?? new Date().toISOString())}</span>
         </div>
         <button type="button" onClick={onClose} aria-label="Yopish" className="grid h-10 w-10 place-items-center rounded-lg text-sub hover:bg-muted"><X size={22} /></button>
       </div>
 
-      {done ? (
+      {cat_.isLoading ? <PageLoader /> : done ? (
         <div className="flex flex-1 justify-center overflow-auto px-4 py-12">
           <div className="flex w-full max-w-[560px] flex-col gap-4">
             <div className="flex items-center gap-3">
               <span className="grid h-11 w-11 place-items-center rounded-full bg-ok-soft text-ok"><CheckCircle2 size={24} /></span>
-              <div className="flex flex-col"><span className="text-xl font-semibold">Qabul qilindi</span>
-                <span className="text-sm text-sub">{done.mats.length ? 'Materiallar ombordan chiqarildi va bemor tarixiga yozildi.' : 'Ishlar bemor tarixiga yozildi.'}</span></div>
+              <div className="flex flex-col"><span className="text-xl font-semibold">Saqlandi</span>
+                <span className="text-sm text-sub">{done.mats.length ? 'Materiallar ombordan chiqarildi va davolash tarixiga yozildi.' : 'Ish davolash tarixiga yozildi.'}</span></div>
             </div>
             <section className="overflow-hidden rounded-xl border border-line bg-white">
-              <div className="border-b border-line px-4 py-3 font-semibold">{done.works}</div>
+              <div className="border-b border-line px-4 py-3 font-semibold">{done.work}{done.tooth && <span className="font-normal text-sub"> · tish {done.tooth}</span>}</div>
               {done.mats.map((d) => (
                 <div key={d.name} className="flex items-center gap-3 border-t border-muted px-4 py-2.5 text-sm">
                   <span className="flex-1">{d.name}</span><b className="text-[#b91c1c] tabular-nums">−{fq(d.q)} {d.unit}</b>
@@ -126,121 +157,180 @@ export function WorksWizard({ visit, patient, onClose }: { visit: Visit; patient
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={onClose} className="h-10 rounded-lg bg-primary px-[18px] text-sm font-medium text-white">Yopish</button>
               <button type="button" onClick={reset} className="h-10 rounded-lg border border-line bg-white px-[18px] text-sm">Yana ish qo‘shish</button>
-              <Link to={`/patients/${patient.id}?tab=history`} className="inline-flex h-10 items-center rounded-lg border border-line bg-white px-[18px] text-sm !text-fg no-underline">Bemor tarixini ochish</Link>
+              <Link to={`/patients/${patient.id}?tab=history`} className="inline-flex h-10 items-center rounded-lg border border-line bg-white px-[18px] text-sm !text-fg no-underline">Davolash tarixini ochish</Link>
             </div>
           </div>
         </div>
       ) : <>
-        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-white px-6 py-2.5">
-          <nav aria-label="Qadamlar" className="flex flex-wrap items-center gap-1">
-            <button type="button" onClick={() => setStep('cats')} className={crumb(step === 'cats')}>Kategoriyalar</button>
-            {step !== 'cats' && <><span aria-hidden="true" className="text-faint">›</span><button type="button" onClick={() => setStep('works')} className={crumb(step === 'works')}>{cat?.name}</button></>}
-            {step === 'mats' && <><span aria-hidden="true" className="text-faint">›</span><span className="px-2.5 py-1.5 text-[15px] font-semibold">{curItem?.name}</span></>}
-          </nav>
-          <span className="flex-1" />
-          {selItems.map((w) => (
-            <span key={w.id} className="inline-flex h-[30px] items-center gap-0.5 rounded-full bg-[#e6f6fc] pr-1 pl-2.5 text-[13px] text-[#075985]">
-              <button type="button" onClick={() => { setCur(w.id); setCatId(w.category_id); setStep('mats'); }}>{w.name} · {nUsed(w.id)} ta</button>
-              <button type="button" onClick={() => unsel(w.id)} aria-label="Ishni olib tashlash" className="h-6 w-6 rounded-full">×</button>
+        <nav aria-label="Qadamlar" className="flex flex-wrap items-center gap-1 border-b border-line bg-white px-4 py-2 sm:px-6">
+          {crumbs.map(([l, s], i) => (
+            <span key={i} className="flex items-center gap-1">
+              {i > 0 && <span aria-hidden="true" className="text-faint">›</span>}
+              <button type="button" onClick={() => s && setStep(s)} className={cx('max-w-[260px] truncate rounded-md px-2 py-1.5 text-[15px]', s === step ? 'font-semibold text-fg' : 'text-primary-hover')}>{l}</button>
             </span>
           ))}
-        </div>
+        </nav>
 
-        <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-6">
           {step === 'cats' && (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-5">
-              {catList.map((c, i) => {
-                const n = (items.data ?? []).filter((w) => w.category_id === c.id);
-                const ns = n.filter((w) => sel.includes(w.id)).length;
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+              {(c?.cats ?? []).map((k, i) => {
                 const t = TINT[i % TINT.length]!;
                 return (
-                  <button key={c.id} type="button" onClick={() => { setCatId(c.id); setStep('works'); }} className={cx(CARD(ns > 0), 'min-h-[220px] p-[22px]')}>
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="grid h-[76px] w-[76px] place-items-center rounded-[20px]" style={{ background: t[0], color: t[1] }}><CatIconSvg icon={c.icon} size={38} /></span>
-                      {ns > 0 && <span className="rounded-full bg-primary px-2.5 py-0.5 text-xs font-semibold text-white">{ns} tanlandi</span>}
-                    </span>
-                    <span className="mt-auto text-2xl font-bold">{c.name}</span>
-                    <span className="text-[15px] text-sub">{n.length} ta ish</span>
+                  <button key={k.id} type="button" onClick={() => pickCat(k.id)} className={cx(CARD(k.id === catId), 'min-h-[190px]')}>
+                    <span className="grid h-[68px] w-[68px] place-items-center rounded-[18px]" style={{ background: t[0], color: t[1] }}><CatIconSvg icon={k.icon} size={34} /></span>
+                    <span className="mt-auto text-2xl font-bold">{k.name}</span>
+                    <span className="text-[15px] text-sub">{c!.items.filter((w) => w.category_id === k.id).length} ta ish{k.ask_teeth ? ' · tish formulasi' : ''}</span>
                   </button>
                 );
               })}
-              {catList.length === 0 && <div className="text-sm text-sub">Ishlar ro‘yxati bo‘sh. Sozlamalar → Bajarilgan ish bo‘limida kategoriya va ishlarni qo‘shing.</div>}
+              {!c?.cats.length && <div className="text-sm text-sub">Ro‘yxat bo‘sh. Sozlamalar → Bajarilgan ish bo‘limida kategoriya va ishlarni qo‘shing.</div>}
             </div>
           )}
+
+          {step === 'teeth' && (
+            <div className="mx-auto flex max-w-[980px] flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <div role="radiogroup" aria-label="Tish formulasi" className="flex rounded-lg bg-muted p-[3px]">
+                  {[['Kattalar', false], ['Bolalar', true]].map(([l, v]) => (
+                    <button key={String(l)} type="button" role="radio" aria-checked={child === v} onClick={() => { setChild(v as boolean); setTeeth(new Set()); }}
+                      className={cx('h-9 rounded-md px-4 text-sm', child === v ? 'bg-white font-semibold shadow-[0_1px_3px_rgba(7,18,30,.12)]' : 'text-sub')}>{String(l)}</button>
+                  ))}
+                </div>
+                <span className="flex-1" />
+                {(() => { const R = child ? CHILD : ADULT; return <>
+                  <button type="button" onClick={() => setRows(R)} className="h-9 rounded-lg border border-line bg-white px-3 text-sm">Hammasi</button>
+                  <button type="button" onClick={() => setRows([R[0]!])} className="h-9 rounded-lg border border-line bg-white px-3 text-sm">Yuqori jag‘</button>
+                  <button type="button" onClick={() => setRows([R[1]!])} className="h-9 rounded-lg border border-line bg-white px-3 text-sm">Pastki jag‘</button>
+                  <button type="button" onClick={() => setTeeth(new Set())} disabled={!teeth.size} className="h-9 rounded-lg px-3 text-sm text-sub disabled:opacity-40">Tozalash</button>
+                </>; })()}
+              </div>
+              <div className="overflow-x-auto rounded-2xl border border-line bg-white p-4">
+                <div className="mx-auto flex w-max flex-col gap-3">
+                  {(child ? CHILD : ADULT).map((row, ri) => (
+                    <div key={ri} className={cx('flex gap-1', ri === 1 && 'border-t-2 border-dashed border-line pt-3')}>
+                      {row.map((t, i) => {
+                        const on = teeth.has(t);
+                        return (
+                          <button key={t} type="button" aria-pressed={on} aria-label={`Tish ${t}`} onClick={() => toggleTooth(t)}
+                            className={cx('flex w-[52px] flex-col items-center gap-1 rounded-lg border py-2', i === row.length / 2 && 'ml-3', on ? 'border-primary bg-primary text-white' : 'border-line bg-white text-[#3d4858] hover:border-primary')}>
+                            {ri === 1 && <span className="text-sm font-semibold">{t}</span>}
+                            <span className={ri === 1 ? 'rotate-180' : ''}><CatIconSvg icon="tooth" size={26} /></span>
+                            {ri === 0 && <span className="text-sm font-semibold">{t}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="text-sm text-sub">{teeth.size ? <>Tanlandi: <b className="text-fg">{tooth}</b></> : 'Tishni bosib belgilang (bir nechta bo‘lishi mumkin) yoki «Hammasi»ni bosing.'}</div>
+            </div>
+          )}
+
           {step === 'works' && (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
               {works.map((w) => {
-                const on = sel.includes(w.id);
+                const n = c!.cards.filter((x) => x.price_item_id === w.id).length;
                 return (
-                  <button key={w.id} type="button" onClick={() => { setCur(w.id); setStep('mats'); if (!on) setSel([...sel, w.id]); }} className={CARD(on)}>
-                    <span className="grid h-[52px] w-[52px] place-items-center rounded-[14px]" style={{ background: TINT[catIdx % TINT.length]![0], color: TINT[catIdx % TINT.length]![1] }}><CatIconSvg icon={cat?.icon} size={26} /></span>
+                  <button key={w.id} type="button" onClick={() => pickWork(w.id)} className={CARD(w.id === workId)}>
                     <span className="flex items-center justify-between gap-2">
                       <span className="text-[19px] font-semibold">{w.name}</span>
-                      {on && <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-full bg-primary text-white"><Check size={16} /></span>}
+                      {w.id === workId && <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-full bg-primary text-white"><Check size={16} /></span>}
                     </span>
-                    <span className="text-sm text-sub">{defMats(w.id).length} ta material kerak</span>
-                    <span className="mt-auto text-[13px] text-primary-hover">{on ? `${nUsed(w.id)} ta material belgilangan` : 'Tanlash uchun bosing'}</span>
+                    <span className="mt-auto text-sm text-sub">{n ? `${n} ta material` : 'Material biriktirilmagan'}</span>
                   </button>
                 );
               })}
               {works.length === 0 && <div className="text-sm text-sub">Bu kategoriyada ish yo‘q.</div>}
             </div>
           )}
-          {step === 'mats' && cur && (
-            <div className="flex flex-col gap-3">
-              <span className="text-sm text-sub">Kartochkani bossangiz material qo‘shiladi. Sonini + va − bilan o‘zgartiring, xato bo‘lsa o‘chiring.</span>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
-                {curMats.map((m) => {
-                  const p = pm.get(m.pid)!;
-                  const k = `${cur}|${m.pid}`, q = used[k] ?? 0, on = q > 0;
-                  const stock = stockOf(m.pid), left = stock - totalOf(m.pid);
-                  const step_ = m.def % 1 ? m.def : 1;
-                  return (
-                    <div key={m.pid} className={cx('flex min-h-[150px] overflow-hidden rounded-[14px]', on ? 'border-2 border-primary bg-[#f2fbff]' : 'border border-line bg-white')}>
-                      {!on ? (
-                        <button type="button" onClick={() => setU(k, m.def)} className="flex flex-1 flex-col items-start gap-2 p-4 text-left">
-                          <span className="grid h-9 w-9 place-items-center rounded-full border-[1.5px] border-dashed border-primary text-primary"><Plus size={18} /></span>
-                          <span className="text-base font-semibold">{p.name}</span>
-                          <span className="text-[13px] text-sub">odatda {fq(m.def)} {p.unit}</span>
-                          <span className={cx('mt-auto text-xs', stock <= 0 ? 'text-[#b91c1c]' : 'text-sub')}>omborda {fq(stock)} {p.unit}</span>
+
+          {step === 'mats' && (
+            groups.length === 0 ? (
+              <div className="mx-auto max-w-[560px] rounded-xl border border-dashed border-line bg-white p-6 text-center text-sm text-sub">
+                Bu ishga material biriktirilmagan. Sozlamalar → Bajarilgan ish bo‘limida qo‘shish mumkin.<br />Materialsiz saqlash uchun «Yakunlash»ni bosing.
+              </div>
+            ) : grp && (
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  {groups.map((g, i) => {
+                    const n = g.cards.filter((x) => (used[x.product_id] ?? 0) > 0).length;
+                    return (
+                      <button key={g.id} type="button" onClick={() => setGi(i)}
+                        className={cx('inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm', i === gi ? 'bg-primary font-semibold text-white' : n ? 'bg-[#e6f6fc] text-[#075985]' : 'bg-white text-sub ring-1 ring-line')}>
+                        <span className="tabular-nums">{i + 1}.</span> {g.name}{n > 0 && <span className={cx('rounded-full px-1.5 text-xs', i === gi ? 'bg-white/25' : 'bg-white')}>{n}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <h3 className="m-0 text-xl font-semibold">{grp.name} <span className="text-base font-normal text-sub">· guruh {gi + 1}/{groups.length}</span></h3>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+                  {grp.cards.map((x) => {
+                    const p = pm.get(x.product_id)!;
+                    const q = used[p.id] ?? 0, on = q > 0, st = x.qty % 1 ? x.qty : 1;
+                    return (
+                      <div key={p.id} className={cx('flex flex-col overflow-hidden rounded-[14px] bg-white', on ? 'border-2 border-primary' : 'border border-line')}>
+                        <button type="button" onClick={() => setU(p.id, on ? 0 : x.qty)} aria-pressed={on} aria-label={`${p.name}${on ? ': olib tashlash' : ': tanlash'}`} className="relative">
+                          <ProductThumb id={p.id} path={p.image_path} size={0} className="h-[130px] w-full rounded-none" />
+                          {on && <span className="absolute top-2 right-2 grid h-7 w-7 place-items-center rounded-full bg-primary text-white shadow"><Check size={16} /></span>}
                         </button>
-                      ) : (
-                        <div className="flex flex-1 flex-col gap-2.5 p-4">
-                          <span className="flex items-start gap-2">
-                            <span className="flex-1 text-base font-semibold">{p.name}</span>
-                            <button type="button" onClick={() => setU(k, 0)} aria-label="O‘chirish" title="O‘chirish" className="-mt-1.5 -mr-1.5 grid h-9 w-9 place-items-center rounded-lg text-[#b91c1c]"><Trash2 size={18} /></button>
-                          </span>
-                          <span className="flex items-center overflow-hidden rounded-[10px] border border-[#b6e3f4] bg-white">
-                            <button type="button" onClick={() => setU(k, Math.max(step_, +(q - step_).toFixed(3)))} aria-label="Kamaytirish" className="h-11 w-12 bg-[#f2fbff] text-[22px]">−</button>
-                            <span className="flex-1 text-center text-[17px] font-bold tabular-nums">{fq(q)} {p.unit}</span>
-                            <button type="button" onClick={() => setU(k, +(q + step_).toFixed(3))} aria-label="Ko‘paytirish" className="h-11 w-12 bg-[#f2fbff] text-[22px]">+</button>
-                          </span>
-                          <span className={cx('text-xs', left < 0 ? 'font-semibold text-[#b91c1c]' : 'text-sub')}>omborda qoladi: {fq(left)} {p.unit}</span>
+                        <div className="flex flex-1 flex-col gap-1.5 p-3">
+                          <span className="text-[15px] leading-tight font-semibold">{p.name}</span>
+                          <span className="text-xs text-sub">{[p.brand, `omborda ${fq(p.qty)} ${p.unit}`].filter(Boolean).join(' · ')}</span>
+                          {on ? (
+                            <span className="mt-auto flex items-center overflow-hidden rounded-lg border border-[#b6e3f4]">
+                              <button type="button" onClick={() => setU(p.id, q - st)} aria-label={`${p.name}: kamaytirish`} className="grid h-10 w-10 place-items-center bg-[#f2fbff]"><Minus size={16} /></button>
+                              <span className="flex-1 text-center text-[15px] font-bold tabular-nums">{fq(q)} {p.unit}</span>
+                              <button type="button" onClick={() => setU(p.id, q + st)} aria-label={`${p.name}: ko‘paytirish`} className="grid h-10 w-10 place-items-center bg-[#f2fbff]"><Plus size={16} /></button>
+                            </span>
+                          ) : (
+                            <button type="button" onClick={() => setU(p.id, x.qty)} className="mt-auto h-10 rounded-lg border border-dashed border-primary text-sm text-primary-hover">+ {fq(x.qty)} {p.unit}</button>
+                          )}
                         </div>
-                      )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )
+          )}
+
+          {step === 'sum' && (
+            <div className="mx-auto flex max-w-[640px] flex-col gap-3">
+              <section className="overflow-hidden rounded-xl border border-line bg-white">
+                <div className="border-b border-line px-4 py-3">
+                  <div className="text-lg font-semibold">{work?.name}</div>
+                  <div className="text-sm text-sub">{cat?.name}{tooth && <> · tish <b className="text-fg">{tooth}</b></>}</div>
+                </div>
+                {chosen.length === 0 && <div className="px-4 py-4 text-sm text-sub">Material tanlanmagan — faqat ish yoziladi.</div>}
+                {chosen.map(([pid, q]) => {
+                  const p = pm.get(pid)!;
+                  const left = p.qty - q;
+                  return (
+                    <div key={pid} className="flex items-center gap-3 border-t border-muted px-4 py-2 text-sm">
+                      <ProductThumb id={p.id} path={p.image_path} size={36} />
+                      <span className="flex-1">{p.name}</span>
+                      <b className="text-[#b91c1c] tabular-nums">−{fq(q)} {p.unit}</b>
+                      <span className={cx('min-w-[120px] text-right text-xs', left < 0 ? 'font-semibold text-[#b91c1c]' : 'text-sub')}>omborda {fq(p.qty)} → {fq(left)}</span>
                     </div>
                   );
                 })}
-                <div className="flex min-h-[150px] flex-col gap-2 rounded-[14px] border-[1.5px] border-dashed border-[#c9d2d9] bg-white p-4">
-                  <label htmlFor="bxExtra" className="text-base font-semibold">Boshqa material</label>
-                  <span className="text-[13px] text-sub">Ro‘yxatda yo‘q bo‘lsa, ombordan tanlang</span>
-                  <select id="bxExtra" value="" onChange={(e) => { const pid = e.target.value; if (!pid) return; setExtra({ ...extra, [cur]: [...(extra[cur] ?? []), pid] }); setU(`${cur}|${pid}`, 1); }}
-                    className="mt-auto h-10 rounded-lg border border-line bg-white px-2 text-sm">
-                    <option value="">Tanlang…</option>
-                    {(products.data ?? []).filter((p) => !curMats.some((m) => m.pid === p.id)).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>)}
-                  </select>
-                </div>
-              </div>
+              </section>
+              {chosen.some(([pid, q]) => (pm.get(pid)?.qty ?? 0) - q < 0) && <div role="alert" className="rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">Ba’zi materiallar omborda yetarli emas — qoldiq minusga tushadi.</div>}
             </div>
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-line bg-white px-6 py-3">
-          <span className="flex-1 text-sm text-sub">{selItems.length ? `${selItems.length} ta ish · ${matCount} ta material belgilandi` : 'Ish tanlanmagan'}</span>
-          {step === 'mats' && <button type="button" onClick={() => setStep('cats')} className="h-11 rounded-lg border border-primary bg-white px-[18px] text-[15px] text-primary-hover">+ Yana ish qo‘shish</button>}
-          <button type="button" onClick={onClose} className="h-11 rounded-lg border border-line bg-white px-[18px] text-[15px]">Bekor qilish</button>
-          <button type="button" disabled={!sel.length || accept.isPending} onClick={() => accept.mutate(undefined)}
-            className={cx('h-11 rounded-lg px-[22px] text-[15px] font-semibold text-white', sel.length ? 'bg-ok' : 'bg-faint')}>Qabul qilish</button>
+        <div className="flex flex-wrap items-center gap-2 border-t border-line bg-white px-4 py-3 sm:px-6">
+          {step !== 'cats' && <button type="button" onClick={back} className={cx(BTN, 'border border-line bg-white')}><ChevronLeft size={18} /> Orqaga</button>}
+          <span className="flex-1 text-sm text-sub">{work ? `${work.name} · ${chosen.length} ta material` : ''}</span>
+          <button type="button" onClick={onClose} className={cx(BTN, 'border border-line bg-white')}>Bekor qilish</button>
+          {step === 'teeth' && <button type="button" disabled={!teeth.size} onClick={next} className={cx(BTN, 'bg-primary font-semibold text-white disabled:opacity-50')}>Davom etish <ChevronRight size={18} /></button>}
+          {step === 'mats' && (groups.length && gi < groups.length - 1
+            ? <button type="button" onClick={next} className={cx(BTN, 'bg-primary font-semibold text-white')}>Keyingi guruh <ChevronRight size={18} /></button>
+            : <button type="button" onClick={() => setStep('sum')} className={cx(BTN, 'bg-primary font-semibold text-white')}>Yakunlash <ChevronRight size={18} /></button>)}
+          {step === 'sum' && <button type="button" disabled={accept.isPending} onClick={() => accept.mutate(undefined)} className={cx(BTN, 'bg-ok font-semibold text-white disabled:opacity-60')}><Check size={18} /> Tasdiqlash</button>}
         </div>
       </>}
     </div>

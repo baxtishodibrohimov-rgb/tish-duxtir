@@ -49,7 +49,7 @@ const R: Record<string, Resource> = {
   staff_shifts: { table: 'staff_shifts', scope: 'branch', read: 'schedule.view', write: 'schedule.edit',
     columns: ['branch_id', 'member_id', 'room_id', 'shift_date', 'starts_at', 'ends_at'], filters: ['branch_id', 'member_id', 'shift_date'], order: 'shift_date, starts_at' },
   price_categories: { table: 'price_categories', scope: 'org', read: null, write: 'settings.edit',
-    columns: ['name', 'color_idx', 'position', 'icon'], order: 'position, name' },
+    columns: ['name', 'color_idx', 'position', 'icon', 'ask_teeth'], order: 'position, name' },
   price_items: { table: 'price_items', scope: 'org', read: null, write: 'settings.edit',
     columns: ['category_id', 'name', 'code', 'price', 'position', 'archived'], filters: ['category_id', 'archived'],
     search: ['name', 'code'], order: 'position, name' },
@@ -106,7 +106,9 @@ const R: Record<string, Resource> = {
     columns: ['product_id', 'warehouse_id', 'visible', 'min_qty', 'order_qty', 'location'], filters: ['product_id', 'warehouse_id'],
     order: 'product_id', key: ['product_id', 'warehouse_id'] },
   calc_cards: { table: 'calc_cards', scope: 'org', read: 'warehouse.view', write: 'warehouse.admin',
-    columns: ['price_item_id', 'product_id', 'qty'], filters: ['price_item_id', 'product_id'], order: 'price_item_id' },
+    columns: ['price_item_id', 'product_id', 'qty', 'group_id', 'position'], filters: ['price_item_id', 'product_id', 'group_id'], order: 'price_item_id, position' },
+  work_mat_groups: { table: 'work_mat_groups', scope: 'org', read: null, write: 'warehouse.admin',
+    columns: ['price_item_id', 'name', 'position'], filters: ['price_item_id'], order: 'price_item_id, position' },
   stock_docs: { table: 'stock_docs', scope: 'org', read: 'warehouse.view', write: 'warehouse.edit',
     columns: ['type', 'doc_date', 'warehouse_id', 'to_warehouse_id', 'counterparty_id', 'responsible_id', 'reason', 'note'],
     filters: ['type', 'status', 'warehouse_id', 'to_warehouse_id', 'counterparty_id', 'responsible_id', 'doc_date', 'act_id'],
@@ -123,7 +125,7 @@ const REFS: Record<string, string> = {
   act_id: 'acts', price_item_id: 'price_items', plan_id: 'treatment_plans', record_id: 'treatment_records',
   cashbox_id: 'cashboxes', to_cashbox_id: 'cashboxes', counterparty_id: 'counterparties', stock_doc_id: 'stock_docs',
   warehouse_id: 'warehouses', to_warehouse_id: 'warehouses', product_id: 'products', brand_id: 'brands',
-  parent_id: 'product_categories', member_id: 'members', doc_id: 'stock_docs', photo_file_id: 'record_files',
+  parent_id: 'product_categories', member_id: 'members', doc_id: 'stock_docs', photo_file_id: 'record_files', group_id: 'work_mat_groups',
 };
 const CATEGORY_REF: Record<string, string> = {
   price_items: 'price_categories', products: 'product_categories', money_moves: 'expense_categories',

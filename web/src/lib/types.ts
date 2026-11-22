@@ -48,7 +48,7 @@ export interface Visit {
 export interface VisitItem { id: string; visit_id: string; price_item_id: string | null; name: string; price: number }
 
 export type CatIcon = 'cons' | 'tooth' | 'hyg' | 'crown' | 'braces' | 'surg';
-export interface PriceCategory { id: string; org_id: string; name: string; color_idx: number; position: number; icon: CatIcon }
+export interface PriceCategory { id: string; org_id: string; name: string; color_idx: number; position: number; icon: CatIcon; ask_teeth: boolean }
 export interface PriceItem {
   id: string; org_id: string; category_id: string; name: string; code: string | null; price: number;
   position: number; archived: boolean;
@@ -86,6 +86,7 @@ export interface Brand { id: string; org_id: string; name: string; logo_url: str
 export interface Product {
   id: string; org_id: string; category_id: string | null; brand_id: string | null; name: string; sku: string | null;
   barcode: string | null; unit: string; pack_unit: string | null; pack_qty: number; last_cost: number; note: string | null; archived: boolean;
+  image_path?: string | null;
 }
 export interface ProductWhSetting {
   product_id: string; warehouse_id: string; org_id: string; visible: boolean; min_qty: number; order_qty: number; location: string | null;
@@ -112,7 +113,8 @@ export interface TreatmentRecord {
   id: string; org_id: string; branch_id: string | null; patient_id: string; visit_id: string | null; doctor_id: string | null;
   tooth: string | null; diagnosis: string | null; description: string | null; created_at: string;
 }
-export interface CalcCard { id: string; org_id: string; price_item_id: string; product_id: string; qty: number }
+export interface CalcCard { id: string; org_id: string; price_item_id: string; product_id: string; qty: number; group_id: string | null; position: number }
+export interface WorkMatGroup { id: string; org_id: string; price_item_id: string; name: string; position: number }
 export interface Reminder {
   id: string; org_id: string; patient_id: string | null; assigned_to: string | null; remind_at: string; comment: string | null;
   status: 'planned' | 'sent' | 'cancelled' | 'done'; audience: 'me' | 'admins' | 'owners'; created_by: string | null; created_at: string;
