@@ -102,7 +102,7 @@ export interface StockBalance { product_id: string; warehouse_id: string; org_id
 export interface StockHistoryRow {
   id: number; qty: number; cost: number; moved_at: string; warehouse_id: string; doc_id: string; type: StockDocType;
   number: string; reason: string | null; status: StockDoc['status']; counterparty_id: string | null; to_warehouse_id: string | null;
-  doc_warehouse_id: string;
+  doc_warehouse_id: string; act_patient?: string | null; act_works?: string | null;
 }
 export interface RecordFile {
   id: string; org_id: string; record_id: string | null; patient_id: string; kind: 'image' | 'audio' | 'xray' | 'file';

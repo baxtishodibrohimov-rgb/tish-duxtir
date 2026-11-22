@@ -141,7 +141,7 @@ function History({ wh, product, whId, onClose }: { wh: WhCtx; product: Product; 
                   </button>
                   <div className="text-xs text-sub">
                     {r.type === 'receipt' && wh.supMap.get(r.counterparty_id ?? '')?.name}
-                    {r.type === 'writeoff' && WRITEOFF_REASON[r.reason ?? 'other']}
+                    {r.type === 'writeoff' && (r.act_patient ? `Bajarilgan ish · ${r.act_patient}${r.act_works ? ` (${r.act_works})` : ''}` : WRITEOFF_REASON[r.reason ?? 'other'])}
                     {r.type === 'transfer' && (r.qty > 0 ? `${wh.whLabel(wh.whMap.get(r.doc_warehouse_id))} dan` : `${wh.whLabel(wh.whMap.get(r.to_warehouse_id ?? ''))} ga`)}
                     {r.status === 'reversed' && ' · bekor qilingan'}
                   </div>

@@ -60,8 +60,11 @@ export async function warehouseRoutes(app: FastifyInstance) {
     if (!can(m, 'warehouse.view')) throw forbidden();
     return tx(m.user_id, (c) => many(c,
       `select mv.id, mv.qty, mv.cost, mv.moved_at, mv.warehouse_id, d.id as doc_id, d.type, d.number, d.reason, d.status,
-              d.counterparty_id, d.to_warehouse_id, d.warehouse_id as doc_warehouse_id
+              d.counterparty_id, d.to_warehouse_id, d.warehouse_id as doc_warehouse_id,
+              pt.full_name as act_patient,
+              (select string_agg(ai.name, ', ' order by ai.id) from act_items ai where ai.act_id = a.id) as act_works
          from stock_moves mv join stock_docs d on d.id = mv.doc_id
+         left join acts a on a.id = d.act_id left join patients pt on pt.id = a.patient_id
          join warehouses w on w.id = mv.warehouse_id
         where mv.org_id = $1 and mv.product_id = $2 and ($3::uuid is null or mv.warehouse_id = $3)
           and w.branch_id = any($4)
