@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { tx, one, many, type Db } from '../db.js';
 import { requireMember } from '../auth.js';
 import { can, type MemberCtx } from '../perms.js';
+import { z } from 'zod';
 import { bad, forbidden, notFound } from '../errors.js';
 
 async function docFor(c: Db, m: MemberCtx, id: string) {
@@ -10,6 +11,14 @@ async function docFor(c: Db, m: MemberCtx, id: string) {
   if (!d) throw notFound('Hujjat topilmadi');
   return d;
 }
+
+const Uuid = z.string().uuid();
+const DraftBody = z.object({
+  doc_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), warehouse_id: Uuid, to_warehouse_id: Uuid.nullable().optional(),
+  counterparty_id: Uuid.nullable().optional(), responsible_id: Uuid.nullable().optional(),
+  reason: z.string().max(40).nullable().optional(), note: z.string().max(2000).nullable().optional(),
+  lines: z.array(z.object({ product_id: Uuid, qty: z.number().min(0).max(1e9), price: z.number().min(0).max(1e12) })).max(500),
+});
 
 export async function warehouseRoutes(app: FastifyInstance) {
   // O'tkazish (draft -> posted). Bazadagi post_stock_doc ruxsat va qoldiqni o'zi tekshiradi.
@@ -26,6 +35,45 @@ export async function warehouseRoutes(app: FastifyInstance) {
       await c.query('delete from stock_doc_lines where doc_id = $1 and qty <= 0', [d.id]);
       await c.query('select post_stock_doc($1)', [d.id]);
       return one(c, 'select * from stock_docs where id = $1', [d.id]);
+    });
+  });
+
+  // Qoralamani saqlash (avtomatik saqlash): sarlavha va qatorlar bitta tranzaksiyada almashtiriladi.
+  // Bitta tovar ikki qatorda kelsa — bitta qatorga birlashtiriladi (miqdor qo'shiladi, narx o'rtacha).
+  app.put<{ Params: { id: string } }>('/api/stock-docs/:id/draft', async (req) => {
+    const m = requireMember(req);
+    const b = DraftBody.parse(req.body);
+    return tx(m.user_id, async (c) => {
+      const d = await docFor(c, m, req.params.id);
+      if (!can(m, 'warehouse.edit', d.branch_id)) throw forbidden();
+      if (d.status !== 'draft') throw bad('Hujjat allaqachon o‘tkazilgan');
+      for (const w of [b.warehouse_id, b.to_warehouse_id]) {
+        if (!w) continue;
+        const r = await one<any>(c, 'select branch_id from warehouses where id = $1 and org_id = $2', [w, m.org_id]);
+        if (!r) throw bad('Ombor topilmadi');
+        if (w === b.warehouse_id && !can(m, 'warehouse.edit', r.branch_id)) throw forbidden();
+      }
+      await c.query(`update stock_docs set doc_date = $2, warehouse_id = $3, to_warehouse_id = $4, counterparty_id = $5,
+                            responsible_id = coalesce($6, responsible_id), reason = $7, note = $8 where id = $1`,
+        [d.id, b.doc_date, b.warehouse_id, b.to_warehouse_id ?? null, b.counterparty_id ?? null, b.responsible_id ?? null, b.reason ?? null, b.note ?? null]);
+      const merged = new Map<string, { qty: number; sum: number }>();
+      for (const l of b.lines) {
+        if (!(l.qty > 0)) continue;
+        const x = merged.get(l.product_id) ?? { qty: 0, sum: 0 };
+        x.qty += l.qty; x.sum += l.qty * l.price;
+        merged.set(l.product_id, x);
+      }
+      if (merged.size) {
+        const ok = await many<any>(c, 'select id from products where org_id = $1 and id = any($2)', [m.org_id, [...merged.keys()]]);
+        if (ok.length !== merged.size) throw bad('Tovar topilmadi');
+      }
+      await c.query('delete from stock_doc_lines where doc_id = $1', [d.id]);
+      let i = 0;
+      for (const [pid, x] of merged) {
+        await c.query('insert into stock_doc_lines (doc_id, product_id, qty, price, position) values ($1, $2, $3, $4, $5)',
+          [d.id, pid, +x.qty.toFixed(3), x.qty ? +(x.sum / x.qty).toFixed(4) : 0, i++]);
+      }
+      return { ok: true, lines: merged.size };
     });
   });
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2, Archive, Download } from 'lucide-react';
+import { Check, X, ChevronDown, ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2, Archive, Download } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
@@ -257,9 +257,13 @@ function FolderModal({ parent, edit, onClose, onSaved }: { parent: string | null
 const UNITS = ['dona', 'gr', 'ml', 'sm', 'm', 'juft', 'to‘plam'];
 const PACKS = ['', 'quti', 'shprits', 'tyubik', 'flakon', 'paket', 'kapsula', 'rulon'];
 
-function ProductModal({ wh, p, defCat, onClose }: { wh: WhCtx; p?: Product; defCat: string | null; onClose: () => void }) {
+export function ProductModal({ wh, p, defCat, onClose, initialName, onSaved }: { wh: WhCtx; p?: Product; defCat: string | null; onClose: () => void; initialName?: string; onSaved?: (p: Product) => void }) {
+  const [newBrand, setNewBrand] = useState<string | null>(null);
+  const addBrand = useAction((name: string) => db.insert<Brand>('brands', { name }), {
+    invalidate: ['brands'], success: 'Brend qo‘shildi', onDone: (b) => { setF((x) => ({ ...x, brand_id: b.id })); setNewBrand(null); },
+  });
   const [f, setF] = useState({
-    category_id: p?.category_id ?? defCat ?? '', name: p?.name ?? '', brand_id: p?.brand_id ?? '', sku: p?.sku ?? '', barcode: p?.barcode ?? '',
+    category_id: p?.category_id ?? defCat ?? '', name: p?.name ?? initialName ?? '', brand_id: p?.brand_id ?? '', sku: p?.sku ?? '', barcode: p?.barcode ?? '',
     unit: p?.unit ?? 'dona', pack_unit: p?.pack_unit ?? '', pack_qty: p?.pack_qty ?? 1, note: p?.note ?? '', archived: p?.archived ?? false,
   });
   const [lim, setLim] = useState<Record<string, ProductWhSetting>>(() => {
@@ -276,7 +280,7 @@ function ProductModal({ wh, p, defCat, onClose }: { wh: WhCtx; p?: Product; defC
     const saved = p ? await db.update<Product>('products', p.id, row) : await db.insert<Product>('products', row);
     await db.insertMany('product_wh_settings', Object.values(lim).map((s) => ({ product_id: saved.id, warehouse_id: s.warehouse_id, visible: s.visible, min_qty: Number(s.min_qty) || 0, order_qty: Number(s.order_qty) || 0, location: s.location || null })));
     return saved;
-  }, { invalidate: ['products', 'product_wh_settings', 'stock'], success: 'Saqlandi', onDone: onClose });
+  }, { invalidate: ['products', 'product_wh_settings', 'stock'], success: 'Saqlandi', onDone: (saved) => { onSaved?.(saved); onClose(); } });
   const setL = (w: string, patch: Partial<ProductWhSetting>) => setLim({ ...lim, [w]: { ...lim[w]!, ...patch } });
   const catOpts = (pid: string | null, depth = 0): { id: string; label: string }[] =>
     wh.cats.filter((c) => c.parent_id === pid).flatMap((c) => [{ id: c.id, label: `${'— '.repeat(depth)}${c.name}` }, ...catOpts(c.id, depth + 1)]);
@@ -288,7 +292,20 @@ function ProductModal({ wh, p, defCat, onClose }: { wh: WhCtx; p?: Product; defC
         <div className="flex flex-col gap-3">
           <Field label="Toifa">{(id) => <Select id={id} value={f.category_id} onChange={(e) => setF({ ...f, category_id: e.target.value })}><option value="">—</option>{catOpts(null).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</Select>}</Field>
           <Field label="Tovar nomi *">{(id) => <Input id={id} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />}</Field>
-          <Field label="Brend">{(id) => <Select id={id} value={f.brand_id} onChange={(e) => setF({ ...f, brand_id: e.target.value })}><option value="">—</option>{wh.brands.filter((b) => !b.archived || b.id === f.brand_id).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select>}</Field>
+          <Field label="Brend">{(id) => newBrand !== null ? (
+            <span className="flex gap-1.5">
+              <Input id={id} autoFocus value={newBrand} placeholder="Yangi brend nomi" onChange={(e) => setNewBrand(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (newBrand.trim()) addBrand.mutate(newBrand.trim()); } if (e.key === 'Escape') { e.stopPropagation(); setNewBrand(null); } }} />
+              <Button variant="primary" aria-label="Brendni saqlash" title="Saqlash" disabled={!newBrand.trim()} loading={addBrand.isPending} onClick={() => addBrand.mutate(newBrand.trim())}><Check size={16} /></Button>
+              <Button aria-label="Bekor qilish" title="Bekor qilish" onClick={() => setNewBrand(null)}><X size={16} /></Button>
+            </span>
+          ) : (
+            <span className="flex gap-1.5">
+              <Select id={id} value={f.brand_id} onChange={(e) => setF({ ...f, brand_id: e.target.value })}><option value="">—</option>{wh.brands.filter((b) => !b.archived || b.id === f.brand_id).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select>
+              <button type="button" onClick={() => setNewBrand('')} aria-label="Yangi brend qo‘shish" title="Yangi brend qo‘shish"
+                className="grid h-10 w-10 flex-none place-items-center rounded-lg bg-[#22c55e] text-white hover:bg-[#16a34a]"><Plus size={18} /></button>
+            </span>
+          )}</Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Artikul">{(id) => <Input id={id} value={f.sku} onChange={(e) => setF({ ...f, sku: e.target.value })} />}</Field>
             <Field label="Shtrix-kod">{(id) => <Input id={id} value={f.barcode} onChange={(e) => setF({ ...f, barcode: e.target.value })} />}</Field>

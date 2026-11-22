@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Copy, Download, Eye, Pencil, Plus, Trash2, Undo2, Minus, CheckCircle2, CircleDashed } from 'lucide-react';
+import { ArrowLeft, Copy, Download, Eye, Pencil, Plus, Trash2, Undo2, Minus, CheckCircle2, CircleDashed, Check } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList } from '@/lib/hooks';
 import { dmy, isoDate, money2 } from '@/lib/format';
 import { navigate, useLocation } from '@/lib/router';
-import type { StockDoc, StockDocLine, StockDocType } from '@/lib/types';
+import type { Product, StockDoc, StockDocLine, StockDocType } from '@/lib/types';
+import { toast } from 'sonner';
+import { ProductSearch } from './ProductSearch';
+import { ProductModal } from './WhSettings';
 import { Badge, Button, Card, Confirm, Field, Input, PageLoader, Select, Textarea, UnderTabs, cx } from '@/components/ui';
 import { DOC_TYPE, WRITEOFF_REASON, fmtQty, type WhCtx } from './common';
 
@@ -163,7 +166,7 @@ export function downloadCsv(name: string, rows: (string | number)[][]) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-interface Line { key: string; product_id: string; qty: number; price: number; inPacks: boolean }
+interface Line { key: string; product_id: string; name?: string; qty: number; price: number; inPacks: boolean }
 
 function DocEditor({ wh, id, onBack, onOpen }: { wh: WhCtx; id: string; onBack: () => void; onOpen: (d: StockDoc) => void }) {
   const { members, memberName } = useOrg();
@@ -173,39 +176,96 @@ function DocEditor({ wh, id, onBack, onOpen }: { wh: WhCtx; id: string; onBack: 
   const [d, setD] = useState<StockDoc | null>(null);
   const [ls, setLs] = useState<Line[]>([]);
   const [dirty, setDirty] = useState(false);
+  const [saveSt, setSaveSt] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [askRev, setAskRev] = useState(false);
-  useEffect(() => { if (doc.data) setD(doc.data); }, [doc.data]);
+  const [creating, setCreating] = useState<string | null>(null);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const qtyRefs = useRef(new Map<string, HTMLInputElement>());
+  const loaded = useRef(false);
+  // Avtomatik saqlash uchun eng so'nggi holat (taymer va sahifadan chiqishda ishlatiladi)
+  const live = useRef({ d, ls, dirty, ver: 0 });
+  live.current.d = d; live.current.ls = ls; live.current.dirty = dirty;
+  const saving = useRef<Promise<void> | null>(null);
+
+  useEffect(() => { if (doc.data && !live.current.dirty) setD(doc.data); }, [doc.data]);
   useEffect(() => {
-    if (lines.data) setLs(lines.data.map((l) => ({ key: l.id, product_id: l.product_id, qty: l.qty, price: l.price, inPacks: false })));
+    if (loaded.current || !lines.data) return;
+    loaded.current = true;
+    setLs(lines.data.map((l) => ({ key: l.id, product_id: l.product_id, qty: l.qty, price: l.price, inPacks: false })));
   }, [lines.data]);
 
   const ro = !d || d.status !== 'draft' || !wh.canEdit(wh.whMap.get(d.warehouse_id));
-  const prods = wh.products.filter((p) => !p.archived);
-  const upd = (patch: Partial<StockDoc>) => { setD({ ...d!, ...patch }); setDirty(true); };
-  const updLine = (i: number, patch: Partial<Line>) => { setLs(ls.map((l, j) => (j === i ? { ...l, ...patch } : l))); setDirty(true); };
+  const touch = () => { live.current.ver++; setDirty(true); };
+  const upd = (patch: Partial<StockDoc>) => { setD({ ...d!, ...patch }); touch(); };
+  const updLine = (i: number, patch: Partial<Line>) => { setLs(ls.map((l, j) => (j === i ? { ...l, ...patch } : l))); touch(); };
 
-  async function persist() {
-    if (!d) return;
-    await db.update('stock_docs', d.id, {
-      doc_date: d.doc_date, warehouse_id: d.warehouse_id, to_warehouse_id: d.to_warehouse_id, counterparty_id: d.counterparty_id,
-      responsible_id: d.responsible_id, reason: d.reason, note: d.note,
-    });
-    for (const l of lines.data ?? []) await db.remove('stock_doc_lines', l.id);
-    const valid = ls.filter((l) => l.product_id && l.qty > 0);
-    if (valid.length) await db.insertMany('stock_doc_lines', valid.map((l, i) => ({ doc_id: d.id, product_id: l.product_id, qty: l.qty, price: l.price, position: i })));
-    setDirty(false);
-    await qc.invalidateQueries({ queryKey: ['stock_doc_lines'] });
-    await qc.invalidateQueries({ queryKey: ['stock_docs'] });
+  /** Qoralamani serverga yozadi; parallel chaqiruvlar navbat bilan bajariladi. */
+  function flush(): Promise<void> {
+    const run = async () => {
+      const { d: cd, ls: cls, ver } = live.current;
+      if (!cd || cd.status !== 'draft' || !live.current.dirty) return;
+      setSaveSt('saving');
+      try {
+        await http.put(`/api/stock-docs/${cd.id}/draft`, {
+          doc_date: cd.doc_date, warehouse_id: cd.warehouse_id, to_warehouse_id: cd.to_warehouse_id, counterparty_id: cd.counterparty_id,
+          responsible_id: cd.responsible_id, reason: cd.reason, note: cd.note,
+          lines: cls.filter((l) => l.product_id && l.qty > 0).map((l) => ({ product_id: l.product_id, qty: l.qty, price: l.price })),
+        });
+        if (live.current.ver === ver) { live.current.dirty = false; setDirty(false); }
+        setSaveSt('saved');
+        void qc.invalidateQueries({ queryKey: ['stock_docs'], refetchType: 'none' });
+        void qc.invalidateQueries({ queryKey: ['stock_doc_lines'], refetchType: 'none' });
+      } catch (e) { setSaveSt('error'); throw e; }
+    };
+    const p = (saving.current ?? Promise.resolve()).catch(() => undefined).then(run);
+    saving.current = p.finally(() => { if (saving.current === p) saving.current = null; });
+    return p;
   }
-  const save = useAction(persist, { success: 'Saqlandi' });
+  // O'zgarishdan 0,8 soniya o'tib avtomatik saqlash
+  useEffect(() => {
+    if (!dirty || ro) return;
+    const t = setTimeout(() => { flush().catch(() => undefined); }, 800);
+    return () => clearTimeout(t);
+  }, [d, ls, dirty, ro]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Sahifadan chiqib ketilsa ham oxirgi o'zgarishlar saqlanadi
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (live.current.dirty) { e.preventDefault(); flush().catch(() => undefined); } };
+    window.addEventListener('beforeunload', warn);
+    return () => { window.removeEventListener('beforeunload', warn); if (live.current.dirty) flush().catch(() => undefined); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!focusKey) return;
+    const el = qtyRefs.current.get(focusKey);
+    if (el) { el.focus(); el.select(); setFocusKey(null); }
+  }, [focusKey, ls]);
+  useEffect(() => { if (!flash) return; const t = setTimeout(() => setFlash(null), 1200); return () => clearTimeout(t); }, [flash]);
+
+  /** Qidiruvdan tanlangan tovar: bor bo'lsa miqdori oshiriladi, yo'q bo'lsa yangi qator. */
+  function pick(p: Product) {
+    const i = ls.findIndex((l) => l.product_id === p.id);
+    if (i >= 0) {
+      const l = ls[i]!;
+      updLine(i, { qty: +(l.qty + (l.inPacks ? p.pack_qty : 1)).toFixed(3) });
+      setFlash(l.key); setFocusKey(l.key);
+      toast.info(`«${p.name}» nakladnoyda bor edi — miqdori oshirildi`);
+      return;
+    }
+    const key = crypto.randomUUID();
+    setLs([...ls, { key, product_id: p.id, name: p.name, qty: 1, price: d!.type === 'receipt' ? p.last_cost ?? 0 : 0, inPacks: false }]);
+    touch(); setFlash(key); setFocusKey(key);
+  }
+
   const post = useAction(async () => {
     if (d!.type === 'receipt' || d!.type === 'return') { if (!d!.counterparty_id) throw new Error('Kontragentni tanlang'); }
     if (!ls.some((l) => l.product_id && l.qty > 0)) throw new Error('Kamida bitta tovar qo‘shing');
-    await persist();
+    live.current.dirty = true;
+    await flush();
     return http.post(`/api/stock-docs/${d!.id}/post`);
-  }, { invalidate: ['stock_docs', 'stock_balances', 'stock'], success: 'Nakladnoy o‘tkazildi' });
+  }, { invalidate: ['stock_docs', 'stock_doc_lines', 'stock_balances', 'stock'], success: 'Nakladnoy o‘tkazildi' });
   const reverse = useAction(() => http.post<StockDoc>(`/api/stock-docs/${d!.id}/reverse`), { invalidate: ['stock_docs', 'stock_balances', 'stock'], success: 'Storno hujjati yaratildi', onDone: (r) => { setAskRev(false); onOpen(r); } });
-  const copy = useAction(() => http.post<StockDoc>(`/api/stock-docs/${d!.id}/copy`), { invalidate: ['stock_docs'], success: 'Nusxa yaratildi', onDone: onOpen });
+  const copy = useAction(async () => { await flush(); return http.post<StockDoc>(`/api/stock-docs/${d!.id}/copy`); }, { invalidate: ['stock_docs'], success: 'Nusxa yaratildi', onDone: onOpen });
 
   if (doc.isLoading || !d) return doc.data === null ? <Card className="p-6 text-sm text-sub">Hujjat topilmadi. <button type="button" className="text-primary" onClick={onBack}>Ro‘yxatga qaytish</button></Card> : <PageLoader />;
   const meta = DOC_TYPE[d.type];
@@ -221,11 +281,17 @@ function DocEditor({ wh, id, onBack, onOpen }: { wh: WhCtx; id: string; onBack: 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="ghost" onClick={() => { if (dirty && !confirm('Saqlanmagan o‘zgarishlar bor. Chiqasizmi?')) return; onBack(); }}><ArrowLeft size={15} /> Ro‘yxatga qaytish</Button>
+        <Button size="sm" variant="ghost" onClick={() => { flush().then(onBack, () => { if (confirm('Saqlab bo‘lmadi. Baribir chiqasizmi?')) onBack(); }); }}><ArrowLeft size={15} /> Ro‘yxatga qaytish</Button>
         <h2 className="m-0 text-lg font-semibold">{meta.label} · {d.number}</h2>
         {d.status === 'draft' ? <Badge tone="amber">O‘tkazilmagan</Badge> : d.status === 'reversed' ? <Badge tone="gray">Bekor qilingan</Badge> : <Badge tone="green">O‘tkazilgan</Badge>}
         {d.reversal_of && <Badge tone="blue">Storno</Badge>}
         {d.act_id && <Badge tone="blue">Akt bo‘yicha</Badge>}
+        {!ro && (
+          <span aria-live="polite" className={cx('inline-flex items-center gap-1 text-xs', saveSt === 'error' ? 'text-bad' : 'text-sub')}>
+            {saveSt === 'error' ? <>Saqlanmadi · <button type="button" className="text-primary underline" onClick={() => flush().catch(() => undefined)}>qayta urinish</button></>
+              : saveSt === 'saving' || dirty ? 'Saqlanmoqda…' : saveSt === 'saved' ? <><Check size={13} className="text-ok" /> Saqlandi</> : 'Qoralama avtomatik saqlanadi'}
+          </span>
+        )}
         <span className="ml-auto flex gap-1">
           <button type="button" onClick={() => copy.mutate(undefined)} aria-label="Nusxa olish" title="Nusxa olib yangi qoralama yaratish" className="grid h-8 w-8 place-items-center rounded-lg text-sub hover:bg-muted"><Copy size={16} /></button>
           <button type="button" onClick={exportCsv} aria-label="Excel’ga yuklab olish" title="Excel’ga yuklab olish" className="grid h-8 w-8 place-items-center rounded-lg text-sub hover:bg-muted"><Download size={16} /></button>
@@ -266,6 +332,12 @@ function DocEditor({ wh, id, onBack, onOpen }: { wh: WhCtx; id: string; onBack: 
       </Card>
 
       <Card className="overflow-x-auto">
+        {!ro && (
+          <div className="border-b border-line p-3">
+            <ProductSearch ref={searchRef} wh={wh} whId={d.warehouse_id} showStock={d.type !== 'receipt'}
+              inDoc={new Map(ls.map((l) => [l.product_id, l.qty]))} onPick={pick} onCreate={setCreating} />
+          </div>
+        )}
         <table className="w-full border-collapse text-sm">
           <thead className="bg-muted text-left text-xs font-semibold text-sub">
             <tr><th className="w-10 px-3 py-2">#</th><th className="px-3 py-2">Tovar</th><th className="px-3 py-2">Miqdori</th>
@@ -273,25 +345,24 @@ function DocEditor({ wh, id, onBack, onOpen }: { wh: WhCtx; id: string; onBack: 
               {d.type !== 'receipt' && <th className="px-3 py-2">Ombordagi qoldiq</th>}<th className="w-10" /></tr>
           </thead>
           <tbody>
-            {ls.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-sub">Tovar qo‘shilmagan</td></tr>}
+            {ls.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-sub">{ro ? 'Tovar yo‘q' : 'Tovar qo‘shilmagan — yuqoridagi qidiruvga tovar nomini yozing'}</td></tr>}
             {ls.map((l, i) => {
               const p = prodOf(l.product_id);
               const k = l.inPacks && p ? p.pack_qty : 1;
               const have = p ? wh.qtyOf(p.id, d.warehouse_id) : 0;
               return (
-                <tr key={l.key} className="border-t border-line">
+                <tr key={l.key} className={cx('border-t border-line transition-colors', flash === l.key && 'bg-primary-soft')}>
                   <td className="px-3 py-2 text-sub">{i + 1}</td>
                   <td className="px-3 py-2">
-                    <select aria-label="Tovar" value={l.product_id} disabled={ro} onChange={(e) => updLine(i, { product_id: e.target.value, price: d.type === 'receipt' ? (prodOf(e.target.value)?.last_cost ?? 0) : 0 })}
-                      className="h-8 w-full min-w-[220px] rounded-lg border border-line bg-white px-2">
-                      <option value="">Tovarni tanlang</option>
-                      {prods.map((x) => <option key={x.id} value={x.id}>{x.name}{x.sku ? ` · ${x.sku}` : ''}</option>)}
-                    </select>
+                    <div className="font-medium">{p?.name ?? l.name ?? '…'}</div>
+                    {p && (p.sku || p.brand_id) && <div className="text-xs text-sub">{[wh.brandMap.get(p.brand_id ?? '')?.name, p.sku].filter(Boolean).join(' · ')}</div>}
                   </td>
                   <td className="px-3 py-2">
                     <span className="flex items-center gap-1">
                       <button type="button" onClick={() => updLine(i, { qty: Math.max(0, +(l.qty - k).toFixed(3)) })} disabled={ro} aria-label="Kamaytirish" className="grid h-8 w-8 place-items-center rounded-lg border border-line hover:bg-muted"><Minus size={14} /></button>
                       <input type="number" min={0} step="any" aria-label="Miqdori" value={+(l.qty / k).toFixed(3)} disabled={ro}
+                        ref={(el) => { if (el) qtyRefs.current.set(l.key, el); else qtyRefs.current.delete(l.key); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); searchRef.current?.focus(); } }}
                         onChange={(e) => updLine(i, { qty: Math.max(0, Number(e.target.value) * k) })} className="h-8 w-20 rounded-lg border border-line px-2 text-right" />
                       <button type="button" onClick={() => updLine(i, { qty: +(l.qty + k).toFixed(3) })} disabled={ro} aria-label="Ko‘paytirish" className="grid h-8 w-8 place-items-center rounded-lg border border-line hover:bg-muted"><Plus size={14} /></button>
                       {p?.pack_unit && p.pack_qty > 1 && !ro ? (
@@ -312,21 +383,20 @@ function DocEditor({ wh, id, onBack, onOpen }: { wh: WhCtx; id: string; onBack: 
                   )}
                   {d.type === 'receipt' && <td className="px-3 py-2 text-right whitespace-nowrap">{money2(l.qty * l.price)}</td>}
                   {d.type !== 'receipt' && <td className={cx('px-3 py-2 whitespace-nowrap', d.status === 'draft' && have < l.qty ? 'text-bad' : 'text-sub')}>{p ? fmtQty(p, have) : ''}</td>}
-                  <td className="px-2 py-2">{!ro && <button type="button" onClick={() => { setLs(ls.filter((_, j) => j !== i)); setDirty(true); }} aria-label="Qatorni o‘chirish" className="grid h-7 w-7 place-items-center rounded-lg text-sub hover:text-bad"><Trash2 size={14} /></button>}</td>
+                  <td className="px-2 py-2">{!ro && <button type="button" onClick={() => { setLs(ls.filter((_, j) => j !== i)); touch(); }} aria-label="Qatorni o‘chirish" className="grid h-7 w-7 place-items-center rounded-lg text-sub hover:text-bad"><Trash2 size={14} /></button>}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-3 py-3">
-          {!ro ? <Button size="sm" onClick={() => { setLs([...ls, { key: crypto.randomUUID(), product_id: '', qty: 1, price: 0, inPacks: false }]); setDirty(true); }}><Plus size={14} /> Tovar qo‘shish</Button> : <span />}
+          <span className="text-sm text-sub">{ls.length} xil tovar</span>
           {d.type === 'receipt' && <span className="text-sm">Jami: <b>{money2(sum)}</b> so‘m</span>}
         </div>
       </Card>
 
       <div className="flex flex-wrap items-center gap-2">
         {!ro && <>
-          <Button loading={save.isPending} disabled={!dirty} onClick={() => save.mutate(undefined)}>Saqlash</Button>
           <Button variant="primary" loading={post.isPending} onClick={() => post.mutate(undefined)}>O‘tkazish</Button>
           <span className="text-xs text-sub">O‘tkazilgandan keyin hujjatni o‘zgartirib bo‘lmaydi — xato bo‘lsa storno qilinadi.</span>
         </>}
@@ -335,6 +405,7 @@ function DocEditor({ wh, id, onBack, onOpen }: { wh: WhCtx; id: string; onBack: 
         )}
         {d.posted_at && <span className="text-xs text-sub">O‘tkazdi: {memberName(d.responsible_id)}, {dmy(d.posted_at)}</span>}
       </div>
+      {creating !== null && <ProductModal wh={wh} defCat={null} initialName={creating} onClose={() => setCreating(null)} onSaved={pick} />}
       <Confirm open={askRev} danger yes="Storno qilish" loading={reverse.isPending} onNo={() => setAskRev(false)} onYes={() => reverse.mutate(undefined)}
         text="Bu hujjatning ombordagi ta’siri to‘liq bekor qilinadi va teskari (storno) hujjat yaratiladi. Kirim tovarlari allaqachon ishlatilgan bo‘lsa, bekor qilib bo‘lmaydi." />
     </div>
