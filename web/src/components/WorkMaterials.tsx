@@ -51,20 +51,38 @@ export function WorkMaterials({ work, allWorks, products, brands, cards, groups 
     await db.update('work_mat_groups', a.id, { position: b.position === a.position ? a.position + dir : b.position });
     await db.update('work_mat_groups', b.id, { position: a.position });
   }, INV);
-  const copy = useAction(async (src: string) => {
-    const sg = groups.filter((g) => g.price_item_id === src).sort((a, b) => a.position - b.position);
-    const map = new Map<string, string>();
-    let gp = grs.length ? Math.max(...grs.map((x) => x.position)) + 1 : 0;
-    for (const g of sg) {
-      const same = grs.find((x) => x.name.trim().toLowerCase() === g.name.trim().toLowerCase());
-      map.set(g.id, same ? same.id : (await db.insert<WorkMatGroup>('work_mat_groups', { price_item_id: work.id, name: g.name, position: gp++ })).id);
-    }
+  // Nusxa: boshqa ishning faqat tanlangan guruhlari ('free' — guruhsiz materiallari).
+  const [pick, setPick] = useState<Set<string>>(new Set());
+  const srcGroups = useMemo(() => {
+    if (!copyFrom) return [];
+    const sc = cards.filter((c) => c.price_item_id === copyFrom);
+    const sg = groups.filter((g) => g.price_item_id === copyFrom).sort((x, y) => x.position - y.position)
+      .map((g) => ({ id: g.id, name: g.name, cards: sc.filter((c) => c.group_id === g.id) })).filter((g) => g.cards.length);
+    const free = sc.filter((c) => !c.group_id || !sg.some((g) => g.id === c.group_id));
+    if (free.length) sg.push({ id: 'free', name: 'Guruhsiz materiallar', cards: free });
+    return sg;
+  }, [copyFrom, cards, groups]);
+  const copy = useAction(async () => {
     const have = new Set(mats.map((m) => m.product_id));
-    const rows = cards.filter((c) => c.price_item_id === src && !have.has(c.product_id)).sort((a, b) => a.position - b.position);
-    let p = nextPos();
-    if (rows.length) await db.insertMany('calc_cards', rows.map((c) => ({ price_item_id: work.id, product_id: c.product_id, qty: c.qty, group_id: c.group_id ? map.get(c.group_id) ?? null : null, position: p++ })));
-    return rows.length;
-  }, { ...INV, onDone: (n) => { setCopyFrom(''); if (!n) alert('Qo‘shiladigan yangi material yo‘q — hammasi allaqachon bor.'); } });
+    let gp = grs.length ? Math.max(...grs.map((x) => x.position)) + 1 : 0;
+    let p = nextPos(), n = 0;
+    for (const g of srcGroups.filter((x) => pick.has(x.id))) {
+      const rows = g.cards.filter((c) => !have.has(c.product_id)).sort((x, y) => x.position - y.position);
+      if (!rows.length) continue;
+      let gid: string | null = null;
+      if (g.id !== 'free') {
+        const same = grs.find((x) => fold(x.name.trim()) === fold(g.name.trim()));
+        gid = same ? same.id : (await db.insert<WorkMatGroup>('work_mat_groups', { price_item_id: work.id, name: g.name, position: gp++ })).id;
+      }
+      await db.insertMany('calc_cards', rows.map((c) => ({ price_item_id: work.id, product_id: c.product_id, qty: c.qty, group_id: gid, position: p++ })));
+      rows.forEach((c) => have.add(c.product_id));
+      n += rows.length;
+    }
+    return n;
+  }, { ...INV, onDone: (n) => {
+    setCopyFrom(''); setPick(new Set());
+    if (!n) alert('Qo‘shiladigan yangi material yo‘q — tanlangan guruhlardagi materiallar bu ishda allaqachon bor.');
+  } });
 
   const toggle = (id: string) => { const s = new Set(sel); if (s.has(id)) s.delete(id); else s.add(id); setSel(s); };
   const others = allWorks.filter((w) => w.id !== work.id && cards.some((c) => c.price_item_id === w.id));
@@ -162,13 +180,43 @@ export function WorkMaterials({ work, allWorks, products, brands, cards, groups 
           <button type="button" onClick={() => setPicker(true)} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3.5 text-sm font-medium text-white"><Plus size={15} /> Material qo‘shish</button>
           {others.length > 0 && (
             <span className="ml-auto flex items-center gap-1.5">
-              <select value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)} aria-label="Qaysi ishdan nusxa olish" className="h-9 max-w-[220px] rounded-md border border-line bg-white px-2 text-sm">
-                <option value="">Boshqa ishdan nusxa…</option>
+              <Copy size={14} className="text-sub" />
+              <select value={copyFrom} onChange={(e) => { setCopyFrom(e.target.value); setPick(new Set()); }} aria-label="Qaysi ishdan nusxa olish" className="h-9 max-w-[240px] rounded-md border border-line bg-white px-2 text-sm">
+                <option value="">Boshqa ishdan guruh nusxalash…</option>
                 {others.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
-              <button type="button" disabled={!copyFrom || copy.isPending} onClick={() => copy.mutate(copyFrom)} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line px-3 text-sm disabled:opacity-50"><Copy size={14} /> Nusxa olish</button>
             </span>
           )}
+        </div>
+      )}
+      {copyFrom && !picker && (
+        <div className="flex flex-col overflow-hidden rounded-[10px] border border-primary">
+          <div className="flex items-center gap-2 border-b border-line bg-[#f2fbff] px-3 py-2">
+            <Copy size={15} className="text-primary" />
+            <span className="flex-1 text-sm font-semibold">«{allWorks.find((w) => w.id === copyFrom)?.name}» — qaysi guruhlar nusxalansin?</span>
+            <button type="button" onClick={() => setPick(pick.size === srcGroups.length ? new Set() : new Set(srcGroups.map((g) => g.id)))} className="text-xs text-primary-hover">{pick.size === srcGroups.length ? 'Hech qaysi' : 'Hammasi'}</button>
+            <button type="button" onClick={() => { setCopyFrom(''); setPick(new Set()); }} aria-label="Yopish" className="grid h-7 w-7 place-items-center rounded text-sub hover:bg-white"><X size={15} /></button>
+          </div>
+          <ul className="m-0 max-h-[320px] list-none overflow-y-auto p-0">
+            {srcGroups.map((g) => {
+              const on = pick.has(g.id), fresh = g.cards.filter((c) => !mats.some((m) => m.product_id === c.product_id)).length;
+              return (
+                <li key={g.id} className="border-t border-muted first:border-t-0">
+                  <label className={cx('flex cursor-pointer items-start gap-2.5 px-3 py-2', on && 'bg-primary-soft/50')}>
+                    <input type="checkbox" checked={on} onChange={() => { const s2 = new Set(pick); if (on) s2.delete(g.id); else s2.add(g.id); setPick(s2); }} className="mt-0.5 h-4 w-4 accent-[var(--color-primary)]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium">{g.name} <span className="font-normal text-sub">· {g.cards.length} ta{fresh < g.cards.length ? `, ${g.cards.length - fresh} tasi bu ishda bor` : ''}</span></span>
+                      <span className="block truncate text-xs text-sub">{g.cards.map((c) => pm.get(c.product_id)?.name).filter(Boolean).join(', ')}</span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="flex items-center justify-end gap-2 border-t border-line p-2">
+            <button type="button" onClick={() => { setCopyFrom(''); setPick(new Set()); }} className="h-9 px-3 text-sm text-sub">Bekor</button>
+            <button type="button" disabled={!pick.size || copy.isPending} onClick={() => copy.mutate(undefined)} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3.5 text-sm font-medium text-white disabled:opacity-50"><Copy size={14} /> {pick.size ? `${pick.size} ta guruhni nusxalash` : 'Guruhni tanlang'}</button>
+          </div>
         </div>
       )}
       <p className="m-0 text-xs text-sub">Materiallarni belgilab guruhlarga ajrating (masalan «Anesteziya», «Izolyatsiya»). Shifokor «Material xarajat»da guruhlarni shu tartibda birin-ketin ko‘radi va keraklisini tanlaydi. Miqdor — odatiy qiymat, shifokor o‘zgartira oladi.</p>
