@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Plus, Banknote, CreditCard, Smartphone, Landmark, Pencil, Trash2, Settings as Gear, WalletCards, ListChecks, Users, TrendingDown, X, UserRound, Download, Wallet, ChevronDown, ChevronRight, Stethoscope } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Plus, Banknote, CreditCard, Smartphone, Landmark, Pencil, Trash2, Settings as Gear, WalletCards, ListChecks, Users, TrendingDown, X, UserRound, Download, Wallet, ChevronDown, ChevronRight, ChevronLeft, CalendarDays, Stethoscope } from 'lucide-react';
 import { downloadCsv } from './warehouse/Docs';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
@@ -50,10 +50,60 @@ function PeriodPicker({ value, onChange }: { value: Period; onChange: (p: Period
   );
 }
 
+const DAY = 86400000;
+const shift = (d: string, n: number) => isoDate(addDays(new Date(`${d}T00:00:00`), n));
+function presetList(): [string, Period][] {
+  const t = today(), now = new Date();
+  const mon = isoDate(addDays(now, -((now.getDay() + 6) % 7)));
+  const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1), pmEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+  return [['Bugun', { from: t, to: t }], ['Kecha', { from: shift(t, -1), to: shift(t, -1) }], ['Shu hafta', { from: mon, to: t }],
+    ['Shu oy', { from: t.slice(0, 8) + '01', to: t }], ['O‘tgan oy', { from: isoDate(pm), to: isoDate(pmEnd) }]];
+}
+/** Davr nomi: "Bugun", "Kecha", "Shu oy" yoki sanalar. */
+function periodLabel(p: Period) {
+  const hit = presetList().find(([, x]) => x.from === p.from && x.to === p.to);
+  if (hit) return hit[0];
+  return p.from === p.to ? dmy(p.from) : `${dmy(p.from)} – ${dmy(p.to)}`;
+}
+/** Ixcham sana tanlash: ‹ [📅 Bugun ▾] ›, ochilganda tez tanlovlar va oraliq. */
+function DateRange({ value, onChange }: { value: Period; onChange: (p: Period) => void }) {
+  const [open, setOpen] = useState(false);
+  const len = Math.round((+new Date(`${value.to}T00:00:00`) - +new Date(`${value.from}T00:00:00`)) / DAY) + 1;
+  const move = (dir: 1 | -1) => onChange({ from: shift(value.from, dir * len), to: shift(value.to, dir * len) });
+  const B = 'grid h-10 w-9 place-items-center rounded-lg text-sub hover:bg-muted md:h-7 md:w-7';
+  return (
+    <div className="relative flex items-center">
+      <button type="button" onClick={() => move(-1)} aria-label="Oldingi davr" className={B}><ChevronLeft size={16} /></button>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog"
+        className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 text-sm font-medium md:h-7 md:text-[13px]">
+        <CalendarDays size={14} className="text-primary" />{periodLabel(value)}<ChevronDown size={14} className="text-sub" />
+      </button>
+      <button type="button" onClick={() => move(1)} disabled={value.to >= today()} aria-label="Keyingi davr" className={cx(B, 'disabled:opacity-30')}><ChevronRight size={16} /></button>
+      {open && <>
+        <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+        <div role="dialog" aria-label="Davrni tanlash" className="absolute top-full right-0 z-50 mt-1 flex w-[300px] flex-col gap-2 rounded-xl border border-line bg-white p-3 shadow-pop">
+          <div className="flex flex-wrap gap-1.5">
+            {presetList().map(([l, p]) => (
+              <button key={l} type="button" onClick={() => { onChange(p); setOpen(false); }}
+                className={cx('h-8 rounded-lg px-2.5 text-[13px] font-medium', value.from === p.from && value.to === p.to ? 'bg-primary text-white' : 'bg-muted text-[#3d4858] hover:bg-[#e6edf2]')}>{l}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 border-t border-line pt-2">
+            <input type="date" aria-label="Boshlanish sanasi" value={value.from} max={value.to} onChange={(e) => e.target.value && onChange({ ...value, from: e.target.value })} className="h-9 min-w-0 flex-1 rounded-lg border border-line px-2 text-[13px]" />
+            <span className="text-sub">—</span>
+            <input type="date" aria-label="Tugash sanasi" value={value.to} min={value.from} max={today()} onChange={(e) => e.target.value && onChange({ ...value, to: e.target.value })} className="h-9 min-w-0 flex-1 rounded-lg border border-line px-2 text-[13px]" />
+          </div>
+        </div>
+      </>}
+    </div>
+  );
+}
+
 export function Cashbox() {
   useTitle('Kassa');
   const [sub, setSub] = useQueryParam<Sub>('tab', 'boxes');
   const [period, setPeriod] = useState<Period>({ from: today(), to: today() });
+  const [boxPeriod, setBoxPeriod] = useState<Period>({ from: today(), to: today() }); // har ochilganda — bugun
   const [op, setOp] = useState<MoneyMove['kind'] | null>(null);
   const [gear, setGear] = useState(false);
   const { can, branch } = useOrg();
@@ -72,7 +122,8 @@ export function Cashbox() {
           ))}
         </div>
         <span className="hidden flex-1 md:block" />
-        <div className="flex items-center gap-1.5 md:gap-1">
+        <div className="flex flex-wrap items-center gap-1.5 md:gap-1">
+          {sub === 'boxes' && <DateRange value={boxPeriod} onChange={setBoxPeriod} />}
           {edit && (sub === 'boxes' || sub === 'ops') && <>
             <button type="button" onClick={() => setOp('income')} className={ACT}><ArrowDownLeft size={14} className="text-ok" /> Kirim</button>
             <button type="button" onClick={() => setOp('expense')} className={ACT}><ArrowUpRight size={14} className="text-bad" /> Xarajat</button>
@@ -82,7 +133,7 @@ export function Cashbox() {
         </div>
       </div>
       {sub === 'ops' && <PeriodPicker value={period} onChange={setPeriod} />}
-      {sub === 'boxes' && <Boxes />}
+      {sub === 'boxes' && <Boxes period={boxPeriod} />}
       {sub === 'ops' && <Operations period={period} />}
       {sub === 'parties' && <Parties />}
       {sub === 'expenses' && <Expenses onAdd={() => setOp('expense')} />}
@@ -107,11 +158,13 @@ interface Details {
 }
 type CardKey = 'ish' | 'pul' | 'xar' | 'foyda';
 
-function Boxes() {
+function Boxes({ period }: { period: Period }) {
   const { branch } = useOrg();
-  const t = today();
-  const s = useQuery({ queryKey: ['cash', 'summary', branch.id, t], queryFn: () => http.get<Summary>(`/api/cash/summary?branch_id=${branch.id}&from=${t}&to=${t}`) });
-  const det = useQuery({ queryKey: ['cash', 'details', branch.id, t], queryFn: () => http.get<Details>(`/api/cash/details?branch_id=${branch.id}&from=${t}&to=${t}`) });
+  const { from, to } = period;
+  const lbl = periodLabel(period);
+  const oneDay = from === to;
+  const s = useQuery({ queryKey: ['cash', 'summary', branch.id, from, to], queryFn: () => http.get<Summary>(`/api/cash/summary?branch_id=${branch.id}&from=${from}&to=${to}`) });
+  const det = useQuery({ queryKey: ['cash', 'details', branch.id, from, to], queryFn: () => http.get<Details>(`/api/cash/details?branch_id=${branch.id}&from=${from}&to=${to}`) });
   const [open, setOpen] = useState<CardKey | null>(null);
   const [doc, setDoc] = useState<string | null>(null);
   const incomeRows = useMemo(() => (det.data?.income ?? []).filter((m) => m.kind === 'income'), [det.data]);
@@ -134,7 +187,7 @@ function Boxes() {
           <button key={k} type="button" onClick={() => setOpen(open === k ? null : k)} aria-expanded={open === k}
             className={cx('flex flex-[1_1_240px] flex-col items-start gap-2 rounded-card border p-6 text-left shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]',
               open === k ? 'border-primary bg-[#f3fafd] shadow-[0_0_0_3px_rgba(0,161,219,.15)]' : 'border-line bg-white hover:border-[#b6e3f4]')}>
-            <span className="flex w-full items-center justify-between text-sm text-sub">Bugun — {l}<ChevronDown size={16} className={cx('transition-transform', open === k && 'rotate-180')} /></span>
+            <span className="flex w-full items-center justify-between text-sm text-sub">{lbl} — {l}<ChevronDown size={16} className={cx('transition-transform', open === k && 'rotate-180')} /></span>
             <span className={cx('text-[32px] leading-tight font-bold tracking-[-0.02em]', c)}>{som(v)}</span>
           </button>
         ))}
@@ -166,13 +219,13 @@ function Boxes() {
                       <td className={cx(NUM, 'font-semibold')}>{som(w.work)}</td><td className={cx(NUM, 'text-ok')}>{som(w.paid)}</td>
                       <td className={cx(NUM, debt ? 'font-semibold text-warn' : 'text-sub')}>{debt ? som(debt) : '—'}</td></tr>); })}
                   {open === 'pul' && (x.income).map((m) => (
-                    <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{hm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who ?? '—'}</td>
+                    <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{oneDay ? hm(m.at) : dmyhm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who ?? '—'}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-[#3d4858]">{m.doc ?? '—'}</td><td className="px-3 py-2 text-[#3d4858]">{m.box}</td><td className="px-3 py-2 text-sub">{m.by_name ?? '—'}</td>
                       <td className={cx(NUM, 'font-semibold', m.kind === 'refund' ? 'text-[#b91c1c]' : 'text-ok')}>{m.kind === 'refund' ? '−' : ''}{som(m.amount)}</td></tr>))}
                   {open === 'xar' && x.expense.map((m) => (
-                    <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{hm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who || '—'}</td>
+                    <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{oneDay ? hm(m.at) : dmyhm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who || '—'}</td>
                       <td className="px-3 py-2 text-[#3d4858]">{m.box}</td><td className="px-3 py-2 text-sub">{m.by_name ?? '—'}</td><td className={cx(NUM, 'font-semibold text-[#b91c1c]')}>{som(m.amount)}</td></tr>))}
-                  {((open === 'ish' && !x.work.length) || (open === 'pul' && !x.income.length) || (open === 'xar' && !x.expense.length)) && <tr><td colSpan={6} className="p-6 text-center text-sub">Bugun yozuv yo‘q</td></tr>}
+                  {((open === 'ish' && !x.work.length) || (open === 'pul' && !x.income.length) || (open === 'xar' && !x.expense.length)) && <tr><td colSpan={6} className="p-6 text-center text-sub">Bu davrda yozuv yo‘q</td></tr>}
                   <tr className="border-t-2 border-line bg-muted/50 font-bold">
                     {open === 'ish' && <><td className="px-3 py-2" colSpan={2}>Jami</td><td className={NUM}>{som(d.work_done)}</td><td className={cx(NUM, 'text-ok')}>{som(x.work.reduce((a, w) => a + w.paid, 0))}</td><td className={cx(NUM, 'text-warn')}>{som(x.work.reduce((a, w) => a + Math.max(0, w.work - w.paid), 0))}</td></>}
                     {open === 'pul' && <><td className="px-3 py-2" colSpan={5}>Jami</td><td className={cx(NUM, 'text-ok')}>{som(d.income)}</td></>}
@@ -188,7 +241,7 @@ function Boxes() {
         {d.cashboxes.map((b) => {
           const Ic = METHOD_ICON[b.method] ?? Banknote;
           return (
-            <section key={b.cashbox_id} className="flex flex-col gap-1.5 rounded-2xl border border-line bg-white p-4" title={`Bugun: +${money(b.period_income)}`}>
+            <section key={b.cashbox_id} className="flex flex-col gap-1.5 rounded-2xl border border-line bg-white p-4" title={`${lbl}: +${money(b.period_income)}`}>
               <span className="inline-flex items-center gap-1.5 text-[13px] text-sub"><Ic size={16} className={METHOD_COLOR[b.method]} /> {b.name}</span>
               <span className="text-xl font-semibold">{som(b.balance)}</span>
             </section>
@@ -198,10 +251,10 @@ function Boxes() {
       <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3.5">
           <Stethoscope size={18} className="text-primary" />
-          <h3 className="m-0 flex-1 text-base font-semibold">Bugun — shifokorlar qancha topdi</h3>
+          <h3 className="m-0 flex-1 text-base font-semibold">{lbl} — shifokorlar qancha topdi</h3>
           <span className="text-[13px] text-sub">Jami: <b className="text-fg">{som(allIn)}</b></span>
         </div>
-        {docs.length === 0 && <div className="p-6 text-center text-sm text-sub">Bugun to‘lov yo‘q</div>}
+        {docs.length === 0 && <div className="p-6 text-center text-sm text-sub">Bu davrda to‘lov yo‘q</div>}
         {docs.map((g, i) => {
           const p = allIn ? Math.round((g.sum * 100) / allIn) : 0, on = doc === g.key;
           return (
@@ -220,7 +273,7 @@ function Boxes() {
                   <table className="w-full overflow-hidden rounded-[10px] border border-line bg-white text-sm">
                     <thead className="bg-muted/70"><tr className="text-left text-xs text-sub uppercase"><th className={TH_}>Vaqt</th><th className={TH_}>Bemor</th><th className={TH_}>To‘lov</th><th className={cx(TH_, 'text-right')}>Topgani</th><th className={cx(TH_, 'text-right')}>Shifokorga {pct}%</th></tr></thead>
                     <tbody>{g.rows.map((m) => (
-                      <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{hm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who ?? '—'}</td><td className="px-3 py-2 text-[#3d4858]">{m.box}</td>
+                      <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{oneDay ? hm(m.at) : dmyhm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who ?? '—'}</td><td className="px-3 py-2 text-[#3d4858]">{m.box}</td>
                         <td className={cx(NUM, 'font-semibold text-ok')}>{som(m.amount)}</td><td className={cx(NUM, 'font-semibold text-[#5b21b6]')}>{som(Math.round((m.amount * pct) / 100))}</td></tr>
                     ))}</tbody>
                   </table>

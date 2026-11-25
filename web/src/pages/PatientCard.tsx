@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, CalendarDays, CalendarPlus, FilePen, Bell, Printer, Trash2, Pencil, Upload, FileText, Lock, Wallet, X, AlertTriangle, IdCard, Plus, UserRound } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, FolderOpen, Zap, ArrowLeft, CalendarDays, CalendarPlus, FilePen, Bell, Printer, Trash2, Pencil, Upload, FileText, Lock, Wallet, X, AlertTriangle, IdCard, Plus, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
@@ -30,13 +30,16 @@ export function PatientCard({ id }: { id: string }) {
   // Jadvaldagi qabuldan kelinganda: ?quick=act (tezkor akt) yoki ?pay=1 (to'lov), doctor — qabul shifokori.
   const { search } = useLocation();
   const [jump] = useState(() => ({ quick: search.get('quick') === 'act', pay: search.get('pay') === '1', doctor: search.get('doctor') || null }));
+  const [quick, setQuick] = useState<{ doctor: string | null } | null>(jump.quick ? { doctor: jump.doctor } : null);
   useEffect(() => {
     if (!jump.quick && !jump.pay) return;
     const q = new URLSearchParams(location.search); q.delete('quick'); q.delete('pay'); q.delete('doctor');
     navigate(`${location.pathname}?${q.toString()}`, true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const tab: Tab = (tab0 as string) === 'files' ? 'docs' : tab0;
-  const { members, memberName } = useOrg();
+  const { members, memberName, me } = useOrg();
+  // Tezkor akt bir marta ochiladi: rejalardan chiqilgach qayta ochilmasin.
+  useEffect(() => { if (tab0 !== 'plans') setQuick(null); }, [tab0]);
   const sum = useQuery({ queryKey: ['patients', 'summary', id], queryFn: () => http.get<Summary>(`/api/patients/${id}/summary`) });
   useTitle(sum.data?.patient.full_name ?? 'Bemor');
 
@@ -89,10 +92,10 @@ export function PatientCard({ id }: { id: string }) {
       {tab === 'info' && <NewPatient patient={p} onDone={() => setTab('visits')} />}
       {tab === 'tasks' && <TasksTab p={p} />}
       {tab === 'visits' && <VisitsTab p={p} />}
-      {tab === 'plans' && <Plans patient={p} quickAct={jump.quick ? { doctor: jump.doctor } : undefined} />}
+      {tab === 'plans' && <Plans patient={p} quickAct={quick ?? undefined} />}
       {tab === 'history' && <HistoryTab p={p} />}
       {tab === 'docs' && <FilesTab p={p} />}
-      {tab === 'finance' && <FinanceTab p={p} s={sum.data!} openPay={jump.pay} payDoctor={jump.doctor} />}
+      {tab === 'finance' && <FinanceTab p={p} s={sum.data!} openPay={jump.pay} payDoctor={jump.doctor} onQuickAct={() => { setQuick({ doctor: me.role === 'doctor' || me.role === 'owner' ? me.user_id : null }); setTab('plans'); }} />}
     </main>
   );
 }
@@ -343,20 +346,24 @@ function FilesTab({ p }: { p: Patient }) {
 }
 
 // ---------------- Moliya: aktlar va to'lovlar ----------------
-interface Move { id: string; kind: string; amount: number; cashbox_id: string; moved_at: string; note: string | null; act_id: string | null; created_by: string | null }
+interface Move { id: string; kind: string; amount: number; cashbox_id: string; moved_at: string; note: string | null; act_id: string | null; doctor_id: string | null; created_by: string | null }
+type FinSub = 'all' | 'works' | 'pays' | 'acts';
 
-function FinanceTab({ p, s, openPay, payDoctor }: { p: Patient; s: Summary; openPay?: boolean; payDoctor?: string | null }) {
-  const { can, branch, me, memberName, branches } = useOrg();
+function FinanceTab({ p, s, openPay, payDoctor, onQuickAct }: { p: Patient; s: Summary; openPay?: boolean; payDoctor?: string | null; onQuickAct: () => void }) {
+  const { can, branch, me, memberName, members, branches, org } = useOrg();
   const acts = useList<Act>('acts', { patient_id: p.id });
   const actIds = (acts.data ?? []).map((a) => a.id);
   const items = useList<ActItem>('act_items', { 'act_id.in': actIds }, { enabled: actIds.length > 0 });
   const moves = useList<Move>('money_moves', { patient_id: p.id }, { enabled: can('cashbox.view') });
   const boxes = useList<Cashbox>('cashboxes', { archived: false });
   const bmap = byId(branches), cbmap = byId(boxes.data);
+  const [sub, setSub] = useState<FinSub>('all');
+  const [open, setOpen] = useState<string | null>(null);
   const [addTo, setAddTo] = useState<string | null>(null);
   const [pay, setPay] = useState<{ act?: string; refund?: boolean } | null>(openPay ? {} : null);
   const [closing, setClosing] = useState<Act | null>(null);
   const [cancel, setCancel] = useState<Act | null>(null);
+  const [delMove, setDelMove] = useState<Move | null>(null);
 
   const newAct = useAction(() => db.insert<Act>('acts', { branch_id: branch.id, patient_id: p.id, doctor_id: me.role === 'doctor' || me.role === 'owner' ? me.user_id : null }),
     { invalidate: ['acts'], onDone: (a) => setAddTo(a.id) });
@@ -365,76 +372,216 @@ function FinanceTab({ p, s, openPay, payDoctor }: { p: Patient; s: Summary; open
   { invalidate: ['act_items'], onDone: () => setAddTo(null) });
   const updItem = useAction(({ id, patch }: { id: string; patch: Record<string, unknown> }) => db.update('act_items', id, patch), { invalidate: ['act_items'] });
   const delItem = useAction((id: string) => db.remove('act_items', id), { invalidate: ['act_items'] });
-  const doCancel = useAction((a: Act) => http.post(`/api/acts/${a.id}/cancel`), { invalidate: ['acts', 'patients', 'stock_balances'], success: 'Akt bekor qilindi', onDone: () => setCancel(null) });
+  const doCancel = useAction((a: Act) => http.post(`/api/acts/${a.id}/cancel`), { invalidate: ['acts', 'patients', 'stock_balances', 'patient-history'], success: 'Akt bekor qilindi', onDone: () => setCancel(null) });
+  const doDelMove = useAction((m: Move) => db.remove('money_moves', m.id), { invalidate: ['money_moves', 'patients', 'cash'], success: 'To‘lov bekor qilindi', onDone: () => setDelMove(null) });
   const edit = can('patients.edit', branch.id);
+  const cash = can('cashbox.edit', branch.id);
   const debt = s.billed - s.paid;
+  const itemsOf = (id: string) => (items.data ?? []).filter((i) => i.act_id === id);
+  const totalOf = (a: Act) => itemsOf(a.id).reduce((x, i) => x + i.qty * i.price, 0) - a.discount;
+  const color = (uid: string | null) => members.find((m) => m.user_id === uid)?.color ?? '#94a3b8';
+
+  // Aktlar va to'lovlar sana bo'yicha bitta qatorga; har qatordan keyingi balans (to'langan − bajarilgan).
+  const ledger = useMemo(() => {
+    const ev: ({ t: 'act'; at: string; a: Act; sum: number } | { t: 'pay'; at: string; m: Move; sum: number })[] = [];
+    for (const a of acts.data ?? []) if (a.status !== 'draft') ev.push({ t: 'act', at: `${a.act_date}T00:00:00|${a.created_at ?? ''}`, a, sum: a.status === 'closed' ? totalOf(a) : 0 });
+    for (const m of moves.data ?? []) ev.push({ t: 'pay', at: `${m.moved_at.slice(0, 10)}T00:00:01|${m.moved_at}`, m, sum: m.kind === 'refund' ? -m.amount : m.amount });
+    ev.sort((x, y) => x.at.localeCompare(y.at));
+    let bal = 0;
+    return ev.map((e) => { bal += e.t === 'act' ? -e.sum : e.sum; return { ...e, bal }; });
+  }, [acts.data, moves.data, items.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const printAct = (a: Act) => printDoc(`Akt · ${dmy(a.act_date)}`, `
+    <h1>Bajarilgan ishlar akti</h1>
+    <p>${esc(org.name)} · ${esc(bmap.get(a.branch_id)?.name ?? '')}<br>Sana: <b>${dmy(a.act_date)}</b></p>
+    <p>Bemor: <b>${esc(p.full_name)}</b>${p.card_number ? ` · №${esc(p.card_number)}` : ''}<br>Shifokor: ${esc(memberName(a.doctor_id))}</p>
+    <table><tr><th>#</th><th>Xizmat</th><th>Tish</th><th>Soni</th><th>Narx</th><th>Summa</th></tr>
+    ${itemsOf(a.id).map((i, n) => `<tr><td>${n + 1}</td><td>${esc(i.name)}</td><td>${esc(i.tooth ?? '')}</td><td>${i.qty}</td><td>${money(i.price)}</td><td>${money(i.qty * i.price)}</td></tr>`).join('')}
+    ${a.discount ? `<tr><td colspan="5">Chegirma</td><td>−${money(a.discount)}</td></tr>` : ''}
+    <tr class="tot"><td colspan="5">Jami</td><td>${money(totalOf(a))} so‘m</td></tr></table>
+    <div class="sign"><span>Shifokor: ____________</span><span>Bemor: ____________</span></div>`);
+  const printMove = (m: Move) => printDoc(`To‘lov · ${dmy(m.moved_at)}`, `
+    <h1>${m.kind === 'refund' ? 'Pul qaytarildi' : 'To‘lov cheki'}</h1>
+    <p>${esc(org.name)}<br>${dmyhm(m.moved_at)}</p>
+    <p>Bemor: <b>${esc(p.full_name)}</b>${p.card_number ? ` · №${esc(p.card_number)}` : ''}</p>
+    <table><tr><td>Summa</td><td><b>${money(m.amount)} so‘m</b></td></tr><tr><td>To‘lov turi</td><td>${esc(cbmap.get(m.cashbox_id)?.name ?? '')}</td></tr>
+    ${m.doctor_id ? `<tr><td>Shifokor</td><td>${esc(memberName(m.doctor_id))}</td></tr>` : ''}${m.note ? `<tr><td>Izoh</td><td>${esc(m.note)}</td></tr>` : ''}
+    <tr><td>Qabul qildi</td><td>${esc(memberName(m.created_by))}</td></tr></table>
+    <p class="muted">Bemor balansi: ${debt > 0 ? `qarz ${money(debt)}` : debt < 0 ? `avans ${money(-debt)}` : '0'} so‘m</p>`);
+
+  const IC = 'grid h-7 w-7 flex-none place-items-center rounded-md text-white';
+  const SUBS: [FinSub, string][] = [['all', 'To‘lovlar va aktlar'], ['works', 'Bajarilgan ishlar'], ['pays', 'To‘lovlar'], ['acts', 'Aktlar']];
+  const closedItems = (acts.data ?? []).filter((a) => a.status === 'closed').flatMap((a) => itemsOf(a.id).map((i) => ({ a, i })))
+    .sort((x, y) => y.a.act_date.localeCompare(x.a.act_date));
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Card className="p-4"><div className="text-xs text-sub">Jami xizmat</div><div className="mt-1 text-xl font-semibold">{som(s.billed)}</div></Card>
-        <Card className="p-4"><div className="text-xs text-sub">To‘langan</div><div className="mt-1 text-xl font-semibold text-ok">{som(s.paid)}</div></Card>
-        <Card className="p-4"><div className="text-xs text-sub">{debt >= 0 ? 'Qarz' : 'Avans'}</div><div className={cx('mt-1 text-xl font-semibold', debt > 0 && 'text-bad')}>{som(Math.abs(debt))}</div></Card>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {edit && <Button variant="primary" size="sm" loading={newAct.isPending} onClick={() => newAct.mutate(undefined)}><Plus size={15} /> Bajarilgan ish (akt)</Button>}
-        {can('cashbox.edit', branch.id) && <Button size="sm" onClick={() => setPay({})}><Wallet size={15} /> To‘lov qabul qilish</Button>}
-        {can('cashbox.edit', branch.id) && <Button size="sm" variant="ghost" onClick={() => setPay({ refund: true })}>Pulni qaytarish</Button>}
-      </div>
-
-      {(acts.data ?? []).length === 0 && <Card><Empty>Bajarilgan ishlar yo‘q</Empty></Card>}
-      {(acts.data ?? []).map((a) => {
-        const its = (items.data ?? []).filter((i) => i.act_id === a.id);
-        const total = its.reduce((x, i) => x + i.qty * i.price, 0) - a.discount;
-        const draft = a.status === 'draft';
-        const mine = can('patients.edit', a.branch_id);
-        return (
-          <Card key={a.id} className={cx('p-4', a.status === 'cancelled' && 'opacity-60')}>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold">Akt · {dmy(a.act_date)}</span>
-              <Badge tone={draft ? 'amber' : a.status === 'closed' ? 'green' : 'gray'}>{draft ? 'Ochiq' : a.status === 'closed' ? 'Yopilgan' : 'Bekor qilingan'}</Badge>
-              <span className="text-xs text-sub">{memberName(a.doctor_id)} · {bmap.get(a.branch_id)?.name ?? 'Boshqa filial'}</span>
-              <span className="ml-auto text-base font-semibold">{som(total)}</span>
-            </div>
-            <div className="mt-2">
-              {its.map((i) => (
-                <div key={i.id} className="flex items-center gap-2 border-t border-line py-1.5 text-sm">
-                  <span className="flex-1">{i.tooth && <b className="mr-1 font-medium">№{i.tooth} —</b>}{i.name}</span>
-                  {draft && mine ? <>
-                    <input type="number" min={1} defaultValue={i.qty} aria-label="Soni" onBlur={(e) => Number(e.target.value) !== i.qty && updItem.mutate({ id: i.id, patch: { qty: Math.max(1, Number(e.target.value) || 1) } })} className="h-7 w-14 rounded-md border border-line px-1.5 text-right" />
-                    <input type="number" min={0} defaultValue={i.price} aria-label="Narx" onBlur={(e) => Number(e.target.value) !== i.price && updItem.mutate({ id: i.id, patch: { price: Math.max(0, Number(e.target.value) || 0) } })} className="h-7 w-28 rounded-md border border-line px-1.5 text-right" />
-                    <button type="button" aria-label="O‘chirish" onClick={() => delItem.mutate(i.id)} className="text-faint hover:text-bad"><X size={14} /></button>
-                  </> : <span className="text-sub">{i.qty > 1 && `${i.qty} × `}{money(i.price)}</span>}
-                </div>
-              ))}
-              {a.discount > 0 && <div className="flex justify-between border-t border-line py-1.5 text-sm text-sub"><span>Chegirma</span><span>−{money(a.discount)}</span></div>}
-            </div>
-            {mine && (
-              <div className="mt-2 flex flex-wrap gap-2 border-t border-line pt-3">
-                {draft && <Button size="sm" onClick={() => setAddTo(a.id)}><Plus size={14} /> Xizmat</Button>}
-                {draft && <DiscountInput act={a} />}
-                {draft && <Button size="sm" variant="primary" disabled={!its.length} onClick={() => setClosing(a)}><Lock size={14} /> Aktni yopish</Button>}
-                {a.status === 'closed' && can('cashbox.edit', branch.id) && total > 0 && <Button size="sm" onClick={() => setPay({ act: a.id })}><Wallet size={14} /> To‘lov</Button>}
-                {a.status !== 'cancelled' && <Button size="sm" variant="ghost" className="ml-auto text-sub" onClick={() => setCancel(a)}>{draft ? 'O‘chirish' : 'Bekor qilish'}</Button>}
-              </div>
-            )}
-          </Card>
-        );
-      })}
-
-      {can('cashbox.view') && (moves.data ?? []).length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="border-b border-line px-4 py-3 font-semibold">To‘lovlar</div>
-          {(moves.data ?? []).map((m) => (
-            <div key={m.id} className="flex flex-wrap items-center gap-x-4 border-b border-line px-4 py-2 text-sm last:border-b-0">
-              <span className="w-36 text-sub">{dmyhm(m.moved_at)}</span>
-              <span className="w-32">{cbmap.get(m.cashbox_id)?.name ?? '—'}</span>
-              <span className="flex-1 text-sub">{m.note} {memberName(m.created_by) !== '—' && `· ${memberName(m.created_by)}`}</span>
-              <span className={cx('font-semibold', m.kind === 'refund' ? 'text-bad' : 'text-ok')}>{m.kind === 'refund' ? '−' : '+'}{money(m.amount)}</span>
-            </div>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="flex gap-1">
+          {edit && <button type="button" onClick={onQuickAct} aria-label="Tezkor akt" title="Tezkor akt (davolash rejasida)" className="grid h-10 w-11 place-items-center rounded-md bg-primary text-white hover:bg-primary-hover"><Zap size={18} /></button>}
+          {cash && <button type="button" onClick={() => setPay({})} aria-label="To‘lov qabul qilish" title="To‘lov qabul qilish" className="grid h-10 w-11 place-items-center rounded-md bg-ok text-white hover:opacity-90"><ArrowDownToLine size={18} /></button>}
+          {cash && <button type="button" onClick={() => setPay({ refund: true })} aria-label="Pulni qaytarish" title="Pulni qaytarish" className="grid h-10 w-11 place-items-center rounded-md bg-bad text-white hover:opacity-90"><ArrowUpFromLine size={18} /></button>}
+        </span>
+        <div role="tablist" className="flex overflow-x-auto rounded-md border border-line bg-white [scrollbar-width:none]">
+          {SUBS.map(([k, l]) => (
+            <button key={k} type="button" role="tab" aria-selected={sub === k} onClick={() => setSub(k)}
+              className={cx('h-10 flex-none border-r border-line px-3.5 text-sm whitespace-nowrap last:border-r-0', sub === k ? 'bg-muted font-medium text-fg' : 'text-[#3d4858] hover:bg-surface')}>{l}</button>
           ))}
+        </div>
+        <span className={cx('ml-auto text-lg font-semibold', debt > 0 ? 'text-bad' : debt < 0 ? 'text-ok' : 'text-sub')}>
+          {debt > 0 ? `Qarz: ${som(debt)}` : debt < 0 ? `Avans: ${som(-debt)}` : 'Balans: 0'}
+        </span>
+      </div>
+
+      {sub === 'all' && (
+        <Card className="overflow-x-auto">
+          <table className="w-full min-w-[720px] border-collapse text-sm">
+            <thead><tr className="text-left text-[15px] text-[#3d4858]">
+              <th className="border-b border-line px-3 py-2.5 font-normal" colSpan={2}>Bajarilgan ishlar aktlari</th>
+              <th className="w-[1%] border-b border-r border-line" />
+              <th className="border-b border-line px-3 py-2.5 font-normal" colSpan={2}>To‘lovlar</th>
+              <th className="w-[1%] border-b border-r border-line" />
+              <th className="w-36 border-b border-line px-3 py-2.5 text-right font-normal">Balans</th>
+            </tr></thead>
+            <tbody>
+              {ledger.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-sub">Hali akt va to‘lov yo‘q</td></tr>}
+              {ledger.map((e) => {
+                const isAct = e.t === 'act';
+                const a = isAct ? e.a : null, m = !isAct ? e.m : null;
+                return [
+                  <tr key={isAct ? a!.id : m!.id} className="border-b border-line">
+                    {a ? <>
+                      <td className={cx('w-28 px-3 py-2', a.status === 'cancelled' && 'text-faint line-through')}>{dmy(a.act_date)}</td>
+                      <td className={cx('px-3 py-2 text-right tabular-nums', a.status === 'cancelled' && 'text-faint line-through')}>{money(totalOf(a))}</td>
+                      <td className="border-r border-line px-2 py-1.5">
+                        <span className="flex gap-1">
+                          <button type="button" onClick={() => setOpen(open === a.id ? null : a.id)} aria-label="Aktni ochish" title="Ishlar ro‘yxati" className={cx(IC, 'bg-primary')}><FolderOpen size={14} /></button>
+                          <button type="button" onClick={() => printAct(a)} aria-label="Aktni chop etish" title="Chop etish" className={cx(IC, 'bg-primary')}><Printer size={14} /></button>
+                          <span title={`Shifokor: ${memberName(a.doctor_id)}`} className={cx(IC, 'text-[10px] font-semibold')} style={{ background: color(a.doctor_id) }}>{initials(memberName(a.doctor_id))}</span>
+                          {a.status === 'closed' && can('patients.edit', a.branch_id) && <button type="button" onClick={() => setCancel(a)} aria-label="Aktni bekor qilish" title="Bekor qilish" className={cx(IC, 'bg-bad')}><Trash2 size={14} /></button>}
+                        </span>
+                      </td>
+                    </> : <><td /><td /><td className="border-r border-line" /></>}
+                    {m ? <>
+                      <td className="w-28 px-3 py-2">{dmy(m.moved_at)}<div className="text-[11px] text-sub">{cbmap.get(m.cashbox_id)?.name ?? ''}</div></td>
+                      <td className={cx('px-3 py-2 text-right font-medium tabular-nums', m.kind === 'refund' ? 'text-bad' : 'text-fg')}>{m.kind === 'refund' ? '−' : ''}{money(m.amount)}</td>
+                      <td className="border-r border-line px-2 py-1.5">
+                        <span className="flex gap-1">
+                          <button type="button" onClick={() => printMove(m)} aria-label="Chekni chop etish" title="Chek" className={cx(IC, 'bg-primary')}><Printer size={14} /></button>
+                          {m.doctor_id && <span title={`Shifokor: ${memberName(m.doctor_id)}`} className={cx(IC, 'text-[10px] font-semibold')} style={{ background: color(m.doctor_id) }}>{initials(memberName(m.doctor_id))}</span>}
+                          {cash && <button type="button" onClick={() => setDelMove(m)} aria-label="To‘lovni bekor qilish" title="Bekor qilish" className={cx(IC, 'bg-bad')}><Trash2 size={14} /></button>}
+                        </span>
+                      </td>
+                    </> : <><td /><td /><td className="border-r border-line" /></>}
+                    <td className={cx('px-3 py-2 text-right font-medium tabular-nums', e.bal < 0 ? 'text-bad' : e.bal > 0 ? 'text-ok' : 'text-sub')}>{e.bal > 0 ? '+' : ''}{money(e.bal)}</td>
+                  </tr>,
+                  a && open === a.id && (
+                    <tr key={`${a.id}-x`} className="border-b border-line bg-surface">
+                      <td colSpan={7} className="px-4 py-2">
+                        {itemsOf(a.id).map((i) => (
+                          <div key={i.id} className="flex justify-between gap-3 py-0.5 text-[13px]"><span>{i.tooth && <b className="mr-1 font-medium">№{i.tooth} —</b>}{i.name}{i.qty > 1 && ` × ${i.qty}`}</span><span className="tabular-nums">{money(i.qty * i.price)}</span></div>
+                        ))}
+                        <div className="mt-1 text-xs text-sub">{memberName(a.doctor_id)} · {bmap.get(a.branch_id)?.name ?? ''}{a.discount ? ` · chegirma ${money(a.discount)}` : ''}</div>
+                      </td>
+                    </tr>
+                  ),
+                ];
+              })}
+            </tbody>
+          </table>
+          <div className="flex flex-wrap justify-end gap-x-10 gap-y-1 border-t border-line px-4 py-3 text-[15px]">
+            <span>Bajarildi: <b className="font-semibold">{money(s.billed)}</b></span>
+            <span>To‘landi: <b className="font-semibold">{money(s.paid)}</b></span>
+            <span className={cx('font-semibold', debt > 0 ? 'text-bad' : debt < 0 ? 'text-ok' : 'text-sub')}>{debt > 0 ? `Qarz: ${money(debt)}` : debt < 0 ? `Avans: ${money(-debt)}` : 'Balans: 0'}</span>
+          </div>
         </Card>
       )}
+
+      {sub === 'works' && (
+        <Card className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-sm">
+            <thead className="bg-muted text-left text-xs font-semibold text-sub"><tr>{['Sana', 'Xizmat', 'Tish', 'Shifokor', 'Soni', 'Summa'].map((h) => <th key={h} className={cx('px-3 py-2', (h === 'Soni' || h === 'Summa') && 'text-right')}>{h}</th>)}</tr></thead>
+            <tbody>
+              {closedItems.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-sub">Bajarilgan ishlar yo‘q</td></tr>}
+              {closedItems.map(({ a, i }) => (
+                <tr key={i.id} className="border-t border-line">
+                  <td className="px-3 py-2 whitespace-nowrap">{dmy(a.act_date)}</td><td className="px-3 py-2">{i.name}</td><td className="px-3 py-2">{i.tooth ?? ''}</td>
+                  <td className="px-3 py-2">{memberName(a.doctor_id)}</td><td className="px-3 py-2 text-right">{i.qty}</td><td className="px-3 py-2 text-right font-medium tabular-nums">{money(i.qty * i.price)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      {sub === 'pays' && (
+        <Card className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-sm">
+            <thead className="bg-muted text-left text-xs font-semibold text-sub"><tr>{['Sana', 'Turi', 'Kassa', 'Shifokor', 'Izoh', 'Summa', ''].map((h, n) => <th key={n} className={cx('px-3 py-2', h === 'Summa' && 'text-right')}>{h}</th>)}</tr></thead>
+            <tbody>
+              {(moves.data ?? []).length === 0 && <tr><td colSpan={7} className="p-8 text-center text-sub">To‘lovlar yo‘q</td></tr>}
+              {(moves.data ?? []).map((m) => (
+                <tr key={m.id} className="border-t border-line">
+                  <td className="px-3 py-2 whitespace-nowrap">{dmyhm(m.moved_at)}</td>
+                  <td className="px-3 py-2">{m.kind === 'refund' ? 'Qaytarish' : 'To‘lov'}</td>
+                  <td className="px-3 py-2">{cbmap.get(m.cashbox_id)?.name ?? '—'}</td>
+                  <td className="px-3 py-2">{m.doctor_id ? memberName(m.doctor_id) : <span className="text-faint">—</span>}</td>
+                  <td className="px-3 py-2 text-sub">{m.note}</td>
+                  <td className={cx('px-3 py-2 text-right font-semibold tabular-nums', m.kind === 'refund' ? 'text-bad' : 'text-ok')}>{m.kind === 'refund' ? '−' : '+'}{money(m.amount)}</td>
+                  <td className="px-2 py-1.5"><span className="flex justify-end gap-1">
+                    <button type="button" onClick={() => printMove(m)} aria-label="Chekni chop etish" className={cx(IC, 'bg-primary')}><Printer size={14} /></button>
+                    {cash && <button type="button" onClick={() => setDelMove(m)} aria-label="To‘lovni bekor qilish" className={cx(IC, 'bg-bad')}><Trash2 size={14} /></button>}
+                  </span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      {sub === 'acts' && <>
+        {edit && <div><Button variant="primary" size="sm" loading={newAct.isPending} onClick={() => newAct.mutate(undefined)}><Plus size={15} /> Bajarilgan ish (akt)</Button></div>}
+        {(acts.data ?? []).length === 0 && <Card><Empty>Bajarilgan ishlar yo‘q</Empty></Card>}
+        {(acts.data ?? []).map((a) => {
+          const its = itemsOf(a.id);
+          const total = totalOf(a);
+          const draft = a.status === 'draft';
+          const mine = can('patients.edit', a.branch_id);
+          return (
+            <Card key={a.id} className={cx('p-4', a.status === 'cancelled' && 'opacity-60')}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">Akt · {dmy(a.act_date)}</span>
+                <Badge tone={draft ? 'amber' : a.status === 'closed' ? 'green' : 'gray'}>{draft ? 'Ochiq' : a.status === 'closed' ? 'Yopilgan' : 'Bekor qilingan'}</Badge>
+                <span className="text-xs text-sub">{memberName(a.doctor_id)} · {bmap.get(a.branch_id)?.name ?? 'Boshqa filial'}</span>
+                <span className="ml-auto text-base font-semibold">{som(total)}</span>
+              </div>
+              <div className="mt-2">
+                {its.map((i) => (
+                  <div key={i.id} className="flex items-center gap-2 border-t border-line py-1.5 text-sm">
+                    <span className="flex-1">{i.tooth && <b className="mr-1 font-medium">№{i.tooth} —</b>}{i.name}</span>
+                    {draft && mine ? <>
+                      <input type="number" min={1} defaultValue={i.qty} aria-label="Soni" onBlur={(e) => Number(e.target.value) !== i.qty && updItem.mutate({ id: i.id, patch: { qty: Math.max(1, Number(e.target.value) || 1) } })} className="h-7 w-14 rounded-md border border-line px-1.5 text-right" />
+                      <input type="number" min={0} defaultValue={i.price} aria-label="Narx" onBlur={(e) => Number(e.target.value) !== i.price && updItem.mutate({ id: i.id, patch: { price: Math.max(0, Number(e.target.value) || 0) } })} className="h-7 w-28 rounded-md border border-line px-1.5 text-right" />
+                      <button type="button" aria-label="O‘chirish" onClick={() => delItem.mutate(i.id)} className="text-faint hover:text-bad"><X size={14} /></button>
+                    </> : <span className="text-sub">{i.qty > 1 && `${i.qty} × `}{money(i.price)}</span>}
+                  </div>
+                ))}
+                {a.discount > 0 && <div className="flex justify-between border-t border-line py-1.5 text-sm text-sub"><span>Chegirma</span><span>−{money(a.discount)}</span></div>}
+              </div>
+              {mine && (
+                <div className="mt-2 flex flex-wrap gap-2 border-t border-line pt-3">
+                  {draft && <Button size="sm" onClick={() => setAddTo(a.id)}><Plus size={14} /> Xizmat</Button>}
+                  {draft && <DiscountInput act={a} />}
+                  {draft && <Button size="sm" variant="primary" disabled={!its.length} onClick={() => setClosing(a)}><Lock size={14} /> Aktni yopish</Button>}
+                  {a.status === 'closed' && cash && total > 0 && <Button size="sm" onClick={() => setPay({ act: a.id })}><Wallet size={14} /> To‘lov</Button>}
+                  {a.status === 'closed' && <Button size="sm" variant="ghost" onClick={() => printAct(a)}><Printer size={14} /> Chop etish</Button>}
+                  {a.status !== 'cancelled' && <Button size="sm" variant="ghost" className="ml-auto text-sub" onClick={() => setCancel(a)}>{draft ? 'O‘chirish' : 'Bekor qilish'}</Button>}
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </>}
 
       {addTo && <ServicePicker withTooth onClose={() => setAddTo(null)} onPick={(list) => addItems.mutate({ act: addTo, list })} />}
       {pay && <PaymentModal patient={p} actId={pay.act} refund={pay.refund} defaultAmount={pay.refund ? 0 : Math.max(debt, 0)}
@@ -444,8 +591,24 @@ function FinanceTab({ p, s, openPay, payDoctor }: { p: Patient; s: Summary; open
       <Confirm open={!!cancel} danger yes={cancel?.status === 'draft' ? 'O‘chirish' : 'Bekor qilish'}
         text={cancel?.status === 'draft' ? 'Ochiq aktni o‘chirasizmi?' : 'Yopilgan akt bekor qilinadi, u bo‘yicha chiqarilgan materiallar omborga qaytariladi. Davom etasizmi?'}
         onNo={() => setCancel(null)} onYes={() => cancel && doCancel.mutate(cancel)} loading={doCancel.isPending} />
+      <Confirm open={!!delMove} danger yes="Bekor qilish" loading={doDelMove.isPending} onNo={() => setDelMove(null)} onYes={() => delMove && doDelMove.mutate(delMove)}
+        text={delMove ? `${dmy(delMove.moved_at)} dagi ${money(delMove.amount)} so‘m ${delMove.kind === 'refund' ? 'qaytarish' : 'to‘lov'} bekor qilinsinmi? Kassa qoldig‘i ham o‘zgaradi.` : ''} />
     </div>
   );
+}
+
+const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+/** Chop etish uchun alohida oynada oddiy hujjat (akt yoki chek) ochiladi. */
+function printDoc(title: string, body: string) {
+  const w = window.open('', '_blank', 'width=720,height=900');
+  if (!w) { toast.error('Brauzer yangi oynani blokladi — ruxsat bering'); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    body{font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:28px}
+    h1{font-size:20px;margin:0 0 12px}p{margin:0 0 10px}table{width:100%;border-collapse:collapse;margin:10px 0}
+    th,td{border:1px solid #ccc;padding:6px 8px;text-align:left}th{background:#f3f4f6}td:last-child{text-align:right}
+    .tot td{font-weight:700}.sign{display:flex;justify-content:space-between;margin-top:40px}.muted{color:#555;font-size:12px}
+    @media print{body{margin:10mm}}</style></head><body>${body}<script>window.onload=()=>{window.print()}<\/script></body></html>`);
+  w.document.close();
 }
 
 function DiscountInput({ act }: { act: Act }) {
