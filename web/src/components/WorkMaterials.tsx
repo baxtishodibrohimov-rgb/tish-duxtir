@@ -247,6 +247,8 @@ function CopyGroups({ work, allWorks, cards, groups, products, onClose }: {
           <input autoFocus type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Guruh, ish yoki material nomi bo‘yicha qidirish" aria-label="Guruh qidirish"
             className="h-10 w-full rounded-lg border border-line pr-3 pl-9 text-sm" />
         </div>
+        {/* Ro'yxat o'z ichida suriladi: qidiruv va "Nusxalash" tugmasi doim ko'rinadi */}
+        <div className="-mx-1 max-h-[min(58vh,560px)] space-y-3 overflow-y-auto overscroll-contain px-1">
         {shown.length === 0 && <div className="p-4 text-center text-sm text-sub">{q ? 'Topilmadi' : 'Boshqa ishlarda guruh yo‘q'}</div>}
         {shown.map((s) => (
           <section key={s.work.id} className="flex flex-col overflow-hidden rounded-lg border border-line">
@@ -266,6 +268,7 @@ function CopyGroups({ work, allWorks, cards, groups, products, onClose }: {
             })}
           </section>
         ))}
+        </div>
       </div>
     </Modal>
   );

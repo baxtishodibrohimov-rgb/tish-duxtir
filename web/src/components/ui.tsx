@@ -127,8 +127,10 @@ export function Modal({ open, onClose, title, children, footer, width = 520 }:
   }, [open]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[rgba(7,18,30,.35)] p-4"
+    // Tashqi qatlam aylanadi; ichki min-h-full — baland oyna tepasi kesilib qolmasin (markazlash faqat sig'sa).
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-[rgba(7,18,30,.35)]"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex min-h-full items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div ref={ref} role="dialog" aria-modal="true" style={{ maxWidth: width }}
         className="app-modal w-full border border-line bg-white">
         <div className="flex items-center justify-between gap-3 border-b border-line px-5 pt-[18px] pb-[14px]">
@@ -137,6 +139,7 @@ export function Modal({ open, onClose, title, children, footer, width = 520 }:
         </div>
         <div className="px-5 py-5">{children}</div>
         {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 pt-[18px] pb-5">{footer}</div>}
+      </div>
       </div>
     </div>
   );
