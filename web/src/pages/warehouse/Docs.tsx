@@ -60,7 +60,9 @@ function DocList({ wh, type, onOpen }: { wh: WhCtx; type: StockDocType; onOpen: 
     : type === 'writeoff' ? WRITEOFF_REASON[d.reason ?? 'other'] ?? d.reason ?? '' : wh.supMap.get(d.counterparty_id ?? '')?.name ?? '';
   const has = (v: string, n: string) => !n || v.toLowerCase().includes(n.toLowerCase());
   // Faqat shu filial omborlariga tegishli nakladnoylar.
-  const rows = (docs.data ?? []).filter((d) => wh.whMap.has(d.warehouse_id) || wh.whMap.has(d.to_warehouse_id ?? '')).filter((d) => {
+  const [mq, setMq] = useState(''); // telefondagi umumiy qidiruv
+  const rows = (docs.data ?? []).filter((d) => wh.whMap.has(d.warehouse_id) || wh.whMap.has(d.to_warehouse_id ?? ''))
+    .filter((d) => !mq || has(`${d.number} ${party(d)} ${d.note ?? ''}`, mq)).filter((d) => {
     const s = docSum(byDoc.get(d.id) ?? []);
     return has(d.number, f.no) && (!f.st || (f.st === 'draft' ? d.status === 'draft' : d.status !== 'draft'))
       && has(party(d), f.party) && has(wh.whLabel(wh.whMap.get(d.warehouse_id)), f.wh) && has(memberName(d.responsible_id), f.resp)
@@ -87,7 +89,35 @@ function DocList({ wh, type, onOpen }: { wh: WhCtx; type: StockDocType; onOpen: 
         {myWhs.length > 0 && <Button variant="primary" size="sm" onClick={() => setAsk(true)}><Plus size={15} /> {meta.create}</Button>}
         <button type="button" onClick={exportCsv} aria-label="Excel’ga yuklab olish" title="Excel’ga yuklab olish" className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-sub hover:bg-muted"><Download size={16} /></button>
       </div>
-      <Card className="overflow-x-auto">
+      {/* Telefon: kartochkalar; ustunlar bo'yicha filtr faqat kompyuterda */}
+      <div className="flex flex-col gap-2 md:hidden">
+        <input type="search" placeholder="Raqam, kontragent yoki izoh bo‘yicha qidirish" aria-label="Nakladnoy qidirish" value={mq}
+          onChange={(e) => { setMq(e.target.value); setPage(0); }}
+          className="h-10 rounded-lg border border-line bg-white px-3 text-[15px]" />
+        {shown.length === 0 && <Card className="p-6 text-center text-sm text-sub">Nakladnoy topilmadi.</Card>}
+        {shown.map((d) => {
+          const draft = d.status === 'draft';
+          return (
+            <button key={d.id} type="button" onClick={() => onOpen(d)} className="flex flex-col gap-1 rounded-xl border border-line bg-white p-3 text-left active:bg-surface">
+              <span className="flex items-center gap-2">
+                <span className="font-semibold text-primary-hover">{d.number}</span>
+                {d.reversal_of && <span className="text-xs text-sub">(storno)</span>}
+                <span className="ml-auto text-xs">
+                  {draft ? <span className="inline-flex items-center gap-1 text-warn"><CircleDashed size={13} /> O‘tkazilmagan</span>
+                    : d.status === 'reversed' ? <span className="text-sub line-through">Bekor qilingan</span>
+                    : <span className="inline-flex items-center gap-1 text-ok"><CheckCircle2 size={13} /> O‘tkazilgan</span>}
+                </span>
+              </span>
+              <span className="truncate text-sm">{party(d) || '—'}</span>
+              <span className="flex items-center gap-2 text-xs text-sub">
+                <span>{dmy(d.doc_date)}</span><span>·</span><span className="truncate">{wh.whLabel(wh.whMap.get(d.warehouse_id))}</span>
+                <b className="ml-auto text-sm font-semibold text-fg tabular-nums">{money2(docSum(byDoc.get(d.id) ?? []))}</b>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <Card className="hidden overflow-x-auto md:block">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-muted text-left text-xs font-semibold text-sub">
             <tr>{['Nakladnoy raqami', 'Holati', meta.party, 'Ombor', 'Javobgar', 'Summa', 'Izoh', 'Sana', ''].map((h, i) => <th key={i} className="px-2 pt-2 pb-1 whitespace-nowrap">{h}</th>)}</tr>

@@ -254,7 +254,8 @@ function Works() {
   const addWork = useAction(() => db.insert<PriceItem>('price_items', { category_id: cat!.id, name: nw.trim(), price: 0, position: works.length }),
     { invalidate: ['price_items'], onDone: (w) => { setNw(''); setWorkId(w.id); } });
   const delWork = useAction((id: string) => db.update('price_items', id, { archived: true }), { invalidate: ['price_items'] });
-  const row = (on: boolean) => cx('flex items-center gap-1 rounded-lg', on ? 'bg-[#e6f6fc] font-semibold text-primary-hover' : 'text-fg');
+  const [askDel, setAskDel] = useState<{ kind: 'cat' | 'work'; id: string; name: string } | null>(null);
+  const row = (on: boolean) => cx('flex items-center gap-3 rounded-lg md:gap-1', on ? 'bg-[#e6f6fc] font-semibold text-primary-hover' : 'text-fg');
   const H = 'px-1.5 pb-1.5 text-xs font-semibold tracking-[.04em] text-sub uppercase';
   const IN = 'h-9 min-w-0 flex-1 rounded-md border border-line px-2.5 text-sm';
   const PLUS = 'h-9 w-9 flex-none rounded-md bg-primary text-xl text-white disabled:opacity-50';
@@ -280,8 +281,8 @@ function Works() {
                   <CatIconSvg icon={c.icon} size={16} />{c.name} <span className="text-xs font-normal text-sub">· {(items.data ?? []).filter((i) => i.category_id === c.id).length}</span>
                 </button>
               )}
-              {renCat?.id !== c.id && <button type="button" onClick={() => setRenCat({ id: c.id, name: c.name })} aria-label={`${c.name}: nomini tahrirlash`} title="Nomini tahrirlash" className="grid h-8 w-8 place-items-center rounded-md text-faint hover:text-primary"><Pencil size={14} /></button>}
-              <button type="button" onClick={() => delCat.mutate(c.id)} aria-label="Kategoriyani o‘chirish" title="O‘chirish" className="grid h-8 w-8 place-items-center rounded-md text-faint hover:text-bad"><Trash2 size={15} /></button>
+              {renCat?.id !== c.id && <button type="button" onClick={() => setRenCat({ id: c.id, name: c.name })} aria-label={`${c.name}: nomini tahrirlash`} title="Nomini tahrirlash" className="grid h-10 w-10 flex-none place-items-center rounded-md text-faint hover:text-primary md:h-8 md:w-8"><Pencil size={14} /></button>}
+              <button type="button" onClick={() => setAskDel({ kind: 'cat', id: c.id, name: c.name })} aria-label="Kategoriyani o‘chirish" title="O‘chirish" className="grid h-10 w-10 flex-none place-items-center rounded-md text-faint hover:text-bad md:h-8 md:w-8"><Trash2 size={15} /></button>
             </div>
           ))}
           <form className="mt-1.5 flex gap-1.5" onSubmit={(e) => { e.preventDefault(); if (nc.trim()) addCat.mutate(undefined); }}>
@@ -312,7 +313,7 @@ function Works() {
                 <span className="text-sm">{w.name || 'Nomsiz'}</span>
                 <span className="text-xs font-normal text-sub">{(cards.data ?? []).filter((c) => c.price_item_id === w.id).length} ta material</span>
               </button>
-              <button type="button" onClick={() => delWork.mutate(w.id)} aria-label="Ishni o‘chirish" title="O‘chirish" className="grid h-8 w-8 place-items-center rounded-md text-faint hover:text-bad"><Trash2 size={15} /></button>
+              <button type="button" onClick={() => setAskDel({ kind: 'work', id: w.id, name: w.name })} aria-label="Ishni o‘chirish" title="O‘chirish" className="grid h-10 w-10 flex-none place-items-center rounded-md text-faint hover:text-bad md:h-8 md:w-8"><Trash2 size={15} /></button>
             </div>
           ))}
           {cat && (
@@ -328,6 +329,9 @@ function Works() {
           {!work ? <span className="py-6 text-sm text-sub">Avval ish qo‘shing yoki tanlang.</span>
             : <WorkMaterials work={work} allWorks={items.data ?? []} products={products.data ?? []} brands={brands.data ?? []} cards={cards.data ?? []} groups={groups.data ?? []} />}
         </section>
+        <Confirm open={!!askDel} danger yes="O‘chirish" loading={delCat.isPending || delWork.isPending} onNo={() => setAskDel(null)}
+          onYes={() => { if (!askDel) return; if (askDel.kind === 'cat') delCat.mutate(askDel.id); else delWork.mutate(askDel.id); setAskDel(null); }}
+          text={askDel?.kind === 'cat' ? `«${askDel.name}» kategoriyasi o‘chirilsinmi? Undagi barcha ishlar va ularning materiallari ham butunlay o‘chadi — buni qaytarib bo‘lmaydi.` : `«${askDel?.name ?? ''}» ishi o‘chirilsinmi? U praysdan ham arxivga o‘tadi.`} />
       </div>
     </div>
   );

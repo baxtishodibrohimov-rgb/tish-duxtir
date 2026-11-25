@@ -142,7 +142,7 @@ export function Header() {
         <div ref={quickRef} className="relative ml-auto flex items-center gap-1">
           {branch && can('patients.edit') && (
             <Link to="/patients/new" aria-label="Yangi bemor" title="Yangi bemor"
-              className={cx('grid h-[30px] w-[30px] place-items-center rounded-full !text-primary no-underline md:hidden', path === '/patients/new' ? 'bg-nav' : 'hover:bg-muted')}>
+              className={cx('grid h-10 w-10 place-items-center rounded-full !text-primary no-underline md:hidden', path === '/patients/new' ? 'bg-nav' : 'hover:bg-muted')}>
               <UserPlus size={18} />
             </Link>
           )}
@@ -153,7 +153,7 @@ export function Header() {
         <div ref={menuRef} className="relative">
           <button type="button" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}
             aria-label={`Mening profilim: ${user?.full_name ?? ''}`} title={user?.full_name}
-            className="grid h-[30px] w-[30px] place-items-center rounded-full">
+            className="grid h-10 w-10 md:h-[30px] md:w-[30px] place-items-center rounded-full">
             <span className="grid h-6 w-6 place-items-center rounded-full bg-nav text-xs font-semibold text-nav-fg">
               {initials(user?.full_name ?? '')}
             </span>
@@ -209,7 +209,7 @@ function Queue({ open, onToggle, onClose }: { open: boolean; onToggle: () => voi
   return (
     <>
       <button type="button" onClick={onToggle} aria-haspopup="dialog" aria-expanded={open} aria-label="Kutish navbati" title="Kutish navbati"
-        className={cx('relative grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', open && 'bg-muted text-fg')}>
+        className={cx('relative grid h-10 w-10 md:h-[30px] md:w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', open && 'bg-muted text-fg')}>
         <Clock3 size={18} />
         <Count n={rows.length} tone="bg-primary" />
       </button>
@@ -263,7 +263,7 @@ function Reminders({ open, onToggle }: { open: boolean; onToggle: () => void }) 
   return (
     <>
       <button type="button" onClick={onToggle} aria-haspopup="dialog" aria-expanded={open} aria-label="Eslatmalar" title="Eslatmalar"
-        className={cx('relative grid h-[30px] w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', open && 'bg-muted text-fg')}>
+        className={cx('relative grid h-10 w-10 md:h-[30px] md:w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', open && 'bg-muted text-fg')}>
         <Bell size={18} />
         <Count n={open_} tone="bg-bad" />
       </button>

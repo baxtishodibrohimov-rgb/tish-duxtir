@@ -173,14 +173,14 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
 
         <div className="min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-6">
           {step === 'cats' && (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] sm:gap-4">
               {(c?.cats ?? []).map((k, i) => {
                 const t = TINT[i % TINT.length]!;
                 return (
-                  <button key={k.id} type="button" onClick={() => pickCat(k.id)} className={cx(CARD(k.id === catId), 'min-h-[190px]')}>
-                    <span className="grid h-[68px] w-[68px] place-items-center rounded-[18px]" style={{ background: t[0], color: t[1] }}><CatIconSvg icon={k.icon} size={34} /></span>
-                    <span className="mt-auto text-2xl font-bold">{k.name}</span>
-                    <span className="text-[15px] text-sub">{c!.items.filter((w) => w.category_id === k.id).length} ta ish{k.ask_teeth ? ' · tish formulasi' : ''}</span>
+                  <button key={k.id} type="button" onClick={() => pickCat(k.id)} className={cx(CARD(k.id === catId), 'min-h-[124px] !gap-1.5 !p-3 sm:min-h-[190px] sm:!gap-2.5 sm:!p-[18px]')}>
+                    <span className="grid h-11 w-11 place-items-center rounded-[14px] sm:h-[68px] sm:w-[68px] sm:rounded-[18px]" style={{ background: t[0], color: t[1] }}><CatIconSvg icon={k.icon} size={28} /></span>
+                    <span className="mt-auto text-lg leading-tight font-bold sm:text-2xl">{k.name}</span>
+                    <span className="text-xs text-sub sm:text-[15px]">{c!.items.filter((w) => w.category_id === k.id).length} ta ish{k.ask_teeth ? ' · tish formulasi' : ''}</span>
                   </button>
                 );
               })}
@@ -205,21 +205,26 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                   <button type="button" onClick={() => setTeeth(new Set())} disabled={!teeth.size} className="h-9 rounded-lg px-3 text-sm text-sub disabled:opacity-40">Tozalash</button>
                 </>; })()}
               </div>
-              <div className="overflow-x-auto rounded-2xl border border-line bg-white p-4">
+              <div className="overflow-x-auto rounded-2xl border border-line bg-white p-2 sm:p-4">
                 <div className="mx-auto flex w-max flex-col gap-3">
                   {(child ? CHILD : ADULT).map((row, ri) => (
-                    <div key={ri} className={cx('flex gap-1', ri === 1 && 'border-t-2 border-dashed border-line pt-3')}>
-                      {row.map((t, i) => {
-                        const on = teeth.has(t);
-                        return (
-                          <button key={t} type="button" aria-pressed={on} aria-label={`Tish ${t}`} onClick={() => toggleTooth(t)}
-                            className={cx('flex w-[52px] flex-col items-center gap-1 rounded-lg border py-2', i === row.length / 2 && 'ml-3', on ? 'border-primary bg-primary text-white' : 'border-line bg-white text-[#3d4858] hover:border-primary')}>
-                            {ri === 1 && <span className="text-sm font-semibold">{t}</span>}
-                            <span className={ri === 1 ? 'rotate-180' : ''}><CatIconSvg icon="tooth" size={26} /></span>
-                            {ri === 0 && <span className="text-sm font-semibold">{t}</span>}
-                          </button>
-                        );
-                      })}
+                    // Har jag' ikki yarmi: telefonda ikki qator, kattaroq ekranda bitta qator.
+                    <div key={ri} className={cx('flex flex-col gap-1.5 sm:flex-row sm:gap-3', ri === 1 && 'border-t-2 border-dashed border-line pt-3')}>
+                      {[row.slice(0, row.length / 2), row.slice(row.length / 2)].map((half, hi) => (
+                        <div key={hi} className="flex gap-1">
+                          {half.map((t) => {
+                            const on = teeth.has(t);
+                            return (
+                              <button key={t} type="button" aria-pressed={on} aria-label={`Tish ${t}`} onClick={() => toggleTooth(t)}
+                                className={cx('flex w-[38px] flex-col items-center gap-0.5 rounded-lg border py-1.5 sm:w-[52px] sm:gap-1 sm:py-2', on ? 'border-primary bg-primary text-white' : 'border-line bg-white text-[#3d4858] hover:border-primary')}>
+                                {ri === 1 && <span className="text-[13px] font-semibold sm:text-sm">{t}</span>}
+                                <span className={ri === 1 ? 'rotate-180' : ''}><CatIconSvg icon="tooth" size={22} /></span>
+                                {ri === 0 && <span className="text-[13px] font-semibold sm:text-sm">{t}</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </div>
@@ -229,13 +234,13 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
           )}
 
           {step === 'works' && (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] sm:gap-4">
               {works.map((w) => {
                 const n = c!.cards.filter((x) => x.price_item_id === w.id).length;
                 return (
-                  <button key={w.id} type="button" onClick={() => pickWork(w.id)} className={CARD(w.id === workId)}>
+                  <button key={w.id} type="button" onClick={() => pickWork(w.id)} className={cx(CARD(w.id === workId), 'min-h-[104px] !p-3 sm:min-h-[150px] sm:!p-[18px]')}>
                     <span className="flex items-center justify-between gap-2">
-                      <span className="text-[19px] font-semibold">{w.name}</span>
+                      <span className="text-base leading-tight font-semibold sm:text-[19px]">{w.name}</span>
                       {w.id === workId && <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-full bg-primary text-white"><Check size={16} /></span>}
                     </span>
                     <span className="mt-auto text-sm text-sub">{n ? `${n} ta material` : 'Material biriktirilmagan'}</span>
@@ -265,14 +270,14 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                   })}
                 </div>
                 <h3 className="m-0 text-xl font-semibold">{grp.name} <span className="text-base font-normal text-sub">· guruh {gi + 1}/{groups.length}</span></h3>
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-4">
                   {grp.cards.map((x) => {
                     const p = pm.get(x.product_id)!;
                     const q = used[p.id] ?? 0, on = q > 0, st = x.qty % 1 ? x.qty : 1;
                     return (
                       <div key={p.id} className={cx('flex flex-col overflow-hidden rounded-[14px] bg-white', on ? 'border-2 border-primary' : 'border border-line')}>
                         <button type="button" onClick={() => setU(p.id, on ? 0 : x.qty)} aria-pressed={on} aria-label={`${p.name}${on ? ': olib tashlash' : ': tanlash'}`} className="relative">
-                          <ProductThumb id={p.id} path={p.image_path} size={0} className="h-[130px] w-full rounded-none" />
+                          <ProductThumb id={p.id} path={p.image_path} size={0} className="h-[104px] w-full rounded-none sm:h-[130px]" />
                           {on && <span className="absolute top-2 right-2 grid h-7 w-7 place-items-center rounded-full bg-primary text-white shadow"><Check size={16} /></span>}
                         </button>
                         <div className="flex flex-1 flex-col gap-1.5 p-3">
@@ -324,7 +329,7 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
 
         <div className="flex flex-wrap items-center gap-2 border-t border-line bg-white px-4 py-3 sm:px-6">
           {step !== 'cats' && <button type="button" onClick={back} className={cx(BTN, 'border border-line bg-white')}><ChevronLeft size={18} /> Orqaga</button>}
-          <span className="flex-1 text-sm text-sub">{work ? `${work.name} · ${chosen.length} ta material` : ''}</span>
+          <span className="flex-1 text-sm text-sub"><span className="hidden sm:inline">{work ? `${work.name} · ${chosen.length} ta material` : ''}</span></span>
           <button type="button" onClick={onClose} className={cx(BTN, 'border border-line bg-white')}>Bekor qilish</button>
           {step === 'teeth' && <button type="button" disabled={!teeth.size} onClick={next} className={cx(BTN, 'bg-primary font-semibold text-white disabled:opacity-50')}>Davom etish <ChevronRight size={18} /></button>}
           {step === 'mats' && (groups.length && gi < groups.length - 1

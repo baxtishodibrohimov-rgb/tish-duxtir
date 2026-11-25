@@ -23,17 +23,17 @@ export function Warehouse() {
   if (wh.loading) return <PageLoader />;
 
   return (
-    <div className="flex flex-col gap-3 px-6 pt-1 pb-6">
-      <div className="flex flex-wrap items-center gap-0.5 border-b border-line pb-1">
+    <div className="flex flex-col gap-3 px-3 pt-2 pb-6 md:px-6 md:pt-1">
+      <div className="-mx-3 flex items-center gap-1 overflow-x-auto border-b border-line px-3 pb-1.5 [scrollbar-width:none] md:mx-0 md:flex-wrap md:gap-0.5 md:overflow-visible md:px-0 md:pb-1">
         {TABS.map((t) => (
           <button key={t.key} type="button" onClick={() => setTab(t.key)}
-            className={cx('h-5 rounded px-2 text-sm whitespace-nowrap', tab === t.key ? 'bg-primary font-medium text-white' : 'text-[#3d4858] hover:text-fg')}>
+            className={cx('h-9 flex-none rounded-lg px-3 text-[15px] whitespace-nowrap md:h-5 md:rounded md:px-2 md:text-sm', tab === t.key ? 'bg-primary font-medium text-white' : 'text-[#3d4858] hover:text-fg')}>
             {t.label}
           </button>
         ))}
         {can('warehouse.admin') && (
           <button type="button" onClick={() => setTab('settings')} aria-label="Ombor sozlamalari" title="Ombor sozlamalari"
-            className={cx('grid h-6 w-6 place-items-center rounded', tab === 'settings' ? 'bg-primary text-white' : 'text-sub hover:bg-muted')}>
+            className={cx('grid h-9 w-9 flex-none place-items-center rounded-lg md:h-6 md:w-6 md:rounded', tab === 'settings' ? 'bg-primary text-white' : 'text-sub hover:bg-muted')}>
             <Gear size={16} />
           </button>
         )}

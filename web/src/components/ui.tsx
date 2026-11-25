@@ -217,7 +217,7 @@ export function LRow({ label, req, htmlFor, children, width = 150, top, hint, cl
 export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
-      className={cx('relative h-5 w-[34px] flex-none rounded-full transition-colors', on ? 'bg-primary' : 'bg-[#cfd8de]')}>
+      className={cx("relative h-5 w-[34px] flex-none rounded-full transition-colors before:absolute before:-inset-3 before:content-['']", on ? 'bg-primary' : 'bg-[#cfd8de]')}>
       <span className={cx('absolute top-[3px] h-3.5 w-3.5 rounded-full bg-white transition-all', on ? 'left-[17px]' : 'left-[3px]')} />
     </button>
   );

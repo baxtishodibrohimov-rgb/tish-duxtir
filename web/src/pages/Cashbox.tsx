@@ -58,23 +58,28 @@ export function Cashbox() {
   const [gear, setGear] = useState(false);
   const { can, branch } = useOrg();
   const edit = can('cashbox.edit', branch.id);
+  const ACT = 'inline-flex h-10 flex-1 items-center justify-center gap-1 rounded-lg border border-line bg-white px-2 text-sm text-fg hover:bg-muted md:h-6 md:flex-none md:border-0 md:bg-transparent md:text-[13px] md:text-sub';
 
   return (
-    <div className="flex flex-col gap-3 px-6 pt-1 pb-6">
-      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b border-line pb-1">
-        {SUBS.map((t) => (
-          <button key={t.key} type="button" role="tab" aria-selected={sub === t.key} onClick={() => setSub(t.key)}
-            className={cx('inline-flex h-5 items-center gap-1.5 rounded px-2 text-sm whitespace-nowrap', sub === t.key ? 'bg-primary font-medium text-white' : 'text-[#3d4858] hover:text-fg')}>
-            <t.icon size={14} /> {t.label}
-          </button>
-        ))}
-        <span className="flex-1" />
-        {edit && (sub === 'boxes' || sub === 'ops') && <>
-          <button type="button" onClick={() => setOp('income')} className="inline-flex h-6 items-center gap-1 rounded px-2 text-[13px] text-sub hover:bg-muted"><ArrowDownLeft size={14} className="text-ok" /> Kirim</button>
-          <button type="button" onClick={() => setOp('expense')} className="inline-flex h-6 items-center gap-1 rounded px-2 text-[13px] text-sub hover:bg-muted"><ArrowUpRight size={14} className="text-bad" /> Xarajat</button>
-          <button type="button" onClick={() => setOp('transfer')} className="inline-flex h-6 items-center gap-1 rounded px-2 text-[13px] text-sub hover:bg-muted"><ArrowLeftRight size={14} /> Kassadan kassaga</button>
-        </>}
-        <button type="button" onClick={() => setGear(true)} aria-label="Kassa sozlamalari" title="Kassa sozlamalari" className="grid h-6 w-6 place-items-center rounded text-sub hover:bg-muted"><Gear size={16} /></button>
+    <div className="flex flex-col gap-3 px-3 pt-2 pb-6 md:px-6 md:pt-1">
+      <div className="flex flex-col gap-2 border-b border-line pb-2 md:flex-row md:flex-wrap md:items-center md:gap-1 md:pb-1">
+        <div role="tablist" className="-mx-3 flex gap-1 overflow-x-auto px-3 [scrollbar-width:none] md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
+          {SUBS.map((t) => (
+            <button key={t.key} type="button" role="tab" aria-selected={sub === t.key} onClick={() => setSub(t.key)}
+              className={cx('inline-flex h-9 flex-none items-center gap-1.5 rounded-lg px-3 text-[15px] whitespace-nowrap md:h-5 md:rounded md:px-2 md:text-sm', sub === t.key ? 'bg-primary font-medium text-white' : 'text-[#3d4858] hover:text-fg')}>
+              <t.icon size={14} /> {t.label}
+            </button>
+          ))}
+        </div>
+        <span className="hidden flex-1 md:block" />
+        <div className="flex items-center gap-1.5 md:gap-1">
+          {edit && (sub === 'boxes' || sub === 'ops') && <>
+            <button type="button" onClick={() => setOp('income')} className={ACT}><ArrowDownLeft size={14} className="text-ok" /> Kirim</button>
+            <button type="button" onClick={() => setOp('expense')} className={ACT}><ArrowUpRight size={14} className="text-bad" /> Xarajat</button>
+            <button type="button" onClick={() => setOp('transfer')} className={ACT}><ArrowLeftRight size={14} /> <span className="md:hidden">Ko‘chirish</span><span className="hidden md:inline">Kassadan kassaga</span></button>
+          </>}
+          <button type="button" onClick={() => setGear(true)} aria-label="Kassa sozlamalari" title="Kassa sozlamalari" className="ml-auto grid h-10 w-10 flex-none place-items-center rounded-lg text-sub hover:bg-muted md:ml-0 md:h-6 md:w-6 md:rounded"><Gear size={16} /></button>
+        </div>
       </div>
       {sub === 'ops' && <PeriodPicker value={period} onChange={setPeriod} />}
       {sub === 'boxes' && <Boxes />}

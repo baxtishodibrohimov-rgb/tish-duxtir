@@ -172,8 +172,8 @@ export function Schedule() {
                   <div className="flex items-center">
                     {i === 0 && RO && <span title="Boshqa filial jadvali — faqat ko‘rish" className="max-w-[45%] flex-none truncate px-2.5 text-xs font-bold text-[#dc2626]">{roBranch!.name}</span>}
                     {i === 0 && <>
-                      <button type="button" aria-label="Oldingi kun" onClick={() => setStart(addDays(start, -1))} className="ml-1 grid h-[30px] w-[26px] flex-none place-items-center rounded-md hover:bg-[#e6edf2]"><ChevronLeft size={16} /></button>
-                      <button type="button" aria-label="Keyingi kun" onClick={() => setStart(addDays(start, 1))} className="grid h-[30px] w-[26px] flex-none place-items-center rounded-md hover:bg-[#e6edf2]"><ChevronRight size={16} /></button>
+                      <button type="button" aria-label="Oldingi kun" onClick={() => setStart(addDays(start, -1))} className="ml-1 grid h-10 w-10 flex-none md:h-[30px] md:w-[26px] place-items-center rounded-md hover:bg-[#e6edf2]"><ChevronLeft size={18} /></button>
+                      <button type="button" aria-label="Keyingi kun" onClick={() => setStart(addDays(start, 1))} className="ml-1 grid h-10 w-10 flex-none md:ml-0 md:h-[30px] md:w-[26px] place-items-center rounded-md hover:bg-[#e6edf2]"><ChevronRight size={18} /></button>
                     </>}
                     <button type="button" onClick={() => setCalFor(calFor === i ? null : i)} aria-haspopup="dialog"
                       className={cx('block w-full truncate px-3 py-2 text-left text-xs font-semibold', calFor === i && 'bg-primary-soft', sameDay(d, now) ? 'text-primary' : 'text-sub')}>
