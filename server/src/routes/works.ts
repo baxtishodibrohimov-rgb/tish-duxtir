@@ -11,7 +11,7 @@ import { bad, forbidden, notFound } from '../errors.js';
 const Body = z.object({
   items: z.array(z.string().uuid()).min(1, 'Ishni tanlang').max(50),
   tooth: z.string().max(300).nullable().optional(), // "36, 37" yoki "Barcha tishlar"
-  materials: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().positive().max(100000) })).max(200),
+  materials: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().positive().max(100000), group: z.string().max(120).nullable().optional() })).max(200),
   warehouse_id: z.string().uuid().nullable().optional(),
 });
 type WorkBody = z.infer<typeof Body>;
@@ -60,6 +60,24 @@ async function recordWorks(c: Db, m: MemberCtx, x: Ctx, b: WorkBody) {
 
   const left = mats.size ? await many<any>(c, `select p.id product_id, p.name, p.unit, coalesce(sb.qty, 0) qty from products p
                                                left join stock_balances sb on sb.product_id = p.id and sb.warehouse_id = $2 where p.id = any($1)`, [[...mats.keys()], wh.id]) : [];
+  // Tarix kartasi (akt yopilganda trigger yaratgan) — to'liq tafsilot: kategoriya, ish, narx, guruhlar bo'yicha materiallar.
+  const info = await many<any>(c, `select i.id, i.name, i.price, pc.name cat from price_items i left join price_categories pc on pc.id = i.category_id where i.id = any($1)`, [b.items]);
+  const pinfo = mats.size ? await many<any>(c, 'select id, name, unit from products where id = any($1)', [[...mats.keys()]]) : [];
+  const groups = new Map<string, { name: string; qty: number; unit: string }[]>();
+  for (const r of b.materials) {
+    const pr = pinfo.find((x) => x.id === r.product_id);
+    const g = r.group?.trim() || 'Materiallar';
+    const list = groups.get(g) ?? [];
+    const same = list.find((x) => x.name === pr?.name);
+    if (same) same.qty += r.qty; else list.push({ name: pr?.name ?? '', qty: r.qty, unit: pr?.unit ?? '' });
+    groups.set(g, list);
+  }
+  const details = {
+    kind: 'works', category: info[0]?.cat ?? null, works: info.map((x) => ({ name: x.name, price: Number(x.price) })),
+    total: info.reduce((a, x) => a + Number(x.price), 0), tooth,
+    groups: [...groups.entries()].map(([name, items]) => ({ name, items })),
+  };
+  await c.query('update treatment_records set details = $2 where act_id = $1', [act.id, JSON.stringify(details)]);
   return { act_id: act.id, stock_doc_id: doc, left };
 }
 

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Camera, ChevronLeft, ChevronRight, FolderPlus, Pencil, Search, SendHorizontal, Smile, Trash2, X } from 'lucide-react';
+import { Camera, ChevronLeft, ChevronRight, FolderPlus, Pencil, Plus, Search, SendHorizontal, Smile, Trash2, X } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
-import { dmyhm, fold, initials, qty as fq } from '@/lib/format';
+import { dmyhm, fold, initials, money, qty as fq } from '@/lib/format';
 import type { Patient } from '@/lib/types';
 import { CatIconSvg, WorksWizard } from './WorksWizard';
 import { Confirm, cx } from './ui';
@@ -15,6 +15,11 @@ interface HRecord {
   id: string; title: string | null; diagnosis: string | null; description: string | null; tooth: string | null; doctor_id: string | null;
   branch_id: string | null; created_at: string; act_id: string | null; act_status: 'draft' | 'closed' | 'cancelled' | null;
   mats: { name: string; unit: string; qty: number }[]; files: HFile[]; comments: HComment[];
+  details: WorkDetails | null;
+}
+interface WorkDetails {
+  kind: 'works'; category: string | null; works: { name: string; price: number }[]; total: number; tooth: string | null;
+  groups: { name: string; items: { name: string; qty: number; unit: string }[] }[];
 }
 
 const STICKERS = ['🦷', '👍', '👌', '✅', '❗', '⚠️', '⭐', '❤️', '😊', '😁', '😬', '😢', '😷', '🔥', '💉', '🩺', '💊', '🩹', '📌', '📞', '🕐', '💰', '🎉', '🙏'];
@@ -36,7 +41,7 @@ export function HistoryTab({ p }: { p: Patient }) {
   const { can, branch, me } = useOrg();
   const h = useQuery({ queryKey: KEY(p.id), queryFn: () => http.get<HRecord[]>(`/api/patients/${p.id}/history`) });
   const [q, setQ] = useState('');
-  const [adding, setAdding] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
   const [wiz, setWiz] = useState(false);
   const qc = useQueryClient();
   const edit = can('patients.edit');
@@ -59,7 +64,7 @@ export function HistoryTab({ p }: { p: Patient }) {
             className="h-10 w-full rounded-lg border border-line bg-white pr-3 pl-9 text-sm" />
         </div>
         {edit && <>
-          <button type="button" onClick={() => setAdding(!adding)} className="inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm text-[#3d4858] hover:bg-white">
+          <button type="button" onClick={() => { barRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); barRef.current?.querySelector('input')?.focus(); }} className="inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm text-[#3d4858] hover:bg-white">
             <FolderPlus size={17} className="text-primary" /> Davolash bosqichi
           </button>
           {can('patients.edit', branch.id) && (
@@ -70,14 +75,14 @@ export function HistoryTab({ p }: { p: Patient }) {
         </>}
       </div>
 
-      {adding && <NewStage p={p} onDone={() => setAdding(false)} />}
       {h.isLoading && <div className="p-6 text-center text-sm text-sub">Yuklanmoqda…</div>}
       {!h.isLoading && list.length === 0 && (
         <div className="rounded-xl border border-dashed border-line bg-white p-8 text-center text-sm text-sub">
-          {q ? 'Hech narsa topilmadi' : 'Davolash tarixi bo‘sh. «Davolash bosqichi» yoki «Material xarajat» bilan boshlang.'}
+          {q ? 'Hech narsa topilmadi' : 'Davolash tarixi bo‘sh. Pastdagi «Yangi bosqich» qatoriga nom yozib ➕ bosing yoki «Material xarajat» kiriting.'}
         </div>
       )}
       {list.map((r) => <StageCard key={r.id} r={r} p={p} canEdit={edit} meId={me.user_id} isOwner={me.role === 'owner'} />)}
+      {edit && <div ref={barRef}><QuickStage p={p} /></div>}
       {wiz && <WorksWizard patient={p} branchId={branch.id} onClose={() => { setWiz(false); void qc.invalidateQueries({ queryKey: KEY(p.id) }); }} />}
     </div>
   );
@@ -93,34 +98,58 @@ function Avatar({ uid, size = 36 }: { uid: string | null; size?: number }) {
   );
 }
 
-/** Yangi davolash bosqichi (karta): nomi, tish, matn va rasmlar. */
-function NewStage({ p, onDone }: { p: Patient; onDone: () => void }) {
+/** Ro'yxat oxiridagi "Yangi bosqich" qatori: nom (ixtiyoriy) va tishlar, ➕ yoki Enter — karta darhol yaratiladi. */
+function QuickStage({ p }: { p: Patient }) {
   const { me, branch } = useOrg();
   const qc = useQueryClient();
-  const [f, setF] = useState({ title: '', tooth: '', description: '' });
-  const [pics, setPics] = useState<File[]>([]);
-  const save = useAction(async () => {
-    if (!f.title.trim()) throw new Error('Bosqich nomini yozing');
-    const r = await db.insert<{ id: string }>('treatment_records', { patient_id: p.id, doctor_id: me.user_id, branch_id: branch.id, title: f.title.trim(), tooth: f.tooth.trim() || null, description: f.description.trim() || null });
-    if (pics.length) await uploadFiles(p.id, r.id, null, pics);
-  }, { success: 'Bosqich qo‘shildi', onDone: () => { void qc.invalidateQueries({ queryKey: KEY(p.id) }); onDone(); } });
-  const IN = 'h-10 rounded-lg border border-line bg-white px-3 text-sm';
+  const [title, setTitle] = useState('');
+  const [teeth, setTeeth] = useState<string[]>([]);
+  const [pick, setPick] = useState(false);
+  const add = useAction(() => db.insert('treatment_records', { patient_id: p.id, doctor_id: me.user_id, branch_id: branch.id, title: title.trim() || 'Yangi bosqich', tooth: teeth.length ? teeth.join(', ') : null }),
+    { onDone: () => { setTitle(''); setTeeth([]); setPick(false); void qc.invalidateQueries({ queryKey: KEY(p.id) }); } });
+  const RB = 'grid h-9 w-9 flex-none place-items-center rounded-full text-white';
   return (
-    <section className="flex flex-col gap-2 rounded-xl border border-primary bg-white p-4">
-      <div className="grid gap-2 sm:grid-cols-[1fr_160px]">
-        <input autoFocus placeholder="Bosqich nomi, masalan: Konsultatsiya, Kanal davolash" aria-label="Bosqich nomi" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} className={IN} />
-        <input placeholder="Tish, masalan: 16, 26" aria-label="Tish raqami" value={f.tooth} onChange={(e) => setF({ ...f, tooth: e.target.value })} className={IN} />
+    <div className="relative rounded-xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04)]">
+      <div className="flex items-center gap-2 py-2 pr-3 pl-4">
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Yangi bosqich" aria-label="Yangi bosqich nomi"
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add.mutate(undefined); } }}
+          className="h-10 min-w-0 flex-1 bg-transparent pl-8 text-[15px] outline-none placeholder:text-sub" />
+        {teeth.length > 0 && <span className="rounded-full bg-[#e6f6fc] px-2.5 py-1 text-xs font-semibold text-[#075985]">🦷 {teeth.join(', ')}</span>}
+        <button type="button" onClick={() => setPick(!pick)} aria-expanded={pick} aria-label="Tishlarni tanlash" title="Tishlar" className={cx(RB, 'bg-primary')}><CatIconSvg icon="tooth" size={17} /></button>
+        <button type="button" disabled={add.isPending} onClick={() => add.mutate(undefined)} aria-label="Bosqich qo‘shish" title="Bosqich qo‘shish (Enter)" className={cx(RB, 'bg-ok disabled:opacity-60')}><Plus size={20} /></button>
       </div>
-      <textarea rows={3} placeholder="Shikoyat, ko‘rik, tashxis, tavsiya…" aria-label="Matn" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })}
-        className="rounded-lg border border-line bg-white px-3 py-2 text-sm" />
-      <PickedPhotos files={pics} onChange={setPics} />
-      <div className="flex flex-wrap items-center gap-2">
-        <PhotoButton onPick={(fs) => setPics([...pics, ...fs])} />
-        <span className="flex-1" />
-        <button type="button" onClick={onDone} className="h-9 px-3 text-sm text-sub">Bekor qilish</button>
-        <button type="button" disabled={save.isPending} onClick={() => save.mutate(undefined)} className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-white disabled:opacity-60">Saqlash</button>
+      {pick && <TeethPicker value={teeth} onChange={setTeeth} />}
+    </div>
+  );
+}
+
+const ADULT_ROWS = [[18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28], [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38]];
+const CHILD_ROWS = [[55, 54, 53, 52, 51, 61, 62, 63, 64, 65], [85, 84, 83, 82, 81, 71, 72, 73, 74, 75]];
+function TeethPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [child, setChild] = useState(false);
+  const rows = child ? CHILD_ROWS : ADULT_ROWS;
+  const tog = (t: number) => { const k = String(t); onChange(value.includes(k) ? value.filter((x) => x !== k) : [...value, k].sort((a, b) => Number(a) - Number(b))); };
+  return (
+    <div className="flex flex-col gap-2 border-t border-line px-4 py-3">
+      <div className="flex gap-1.5">
+        {[['Kattalar', false], ['Bolalar', true]].map(([l, v]) => (
+          <button key={String(l)} type="button" onClick={() => setChild(v as boolean)} className={cx('h-8 rounded-md px-3 text-[13px]', child === v ? 'bg-primary text-white' : 'bg-muted text-[#3d4858]')}>{String(l)}</button>
+        ))}
+        <button type="button" onClick={() => onChange([])} className="ml-auto h-8 px-2 text-[13px] text-sub">Tozalash</button>
       </div>
-    </section>
+      <div className="overflow-x-auto">
+        <div className="flex w-max flex-col gap-1">
+          {rows.map((r, ri) => (
+            <div key={ri} className={cx('flex gap-1', ri === 1 && 'border-t border-dashed border-line pt-1')}>
+              {r.map((t, i) => (
+                <button key={t} type="button" onClick={() => tog(t)} aria-pressed={value.includes(String(t))}
+                  className={cx('h-9 w-9 rounded-md border text-[13px] font-medium', i === r.length / 2 && 'ml-2', value.includes(String(t)) ? 'border-primary bg-primary text-white' : 'border-line bg-white hover:border-primary')}>{t}</button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -142,7 +171,8 @@ function StageCard({ r, p, canEdit, meId, isOwner }: { r: HRecord; p: Patient; c
         <Avatar uid={r.doctor_id} size={38} />
         <div className="flex min-w-0 flex-1 flex-col">
           <h3 className="m-0 text-[17px] leading-snug font-medium">
-            {title}{r.tooth && <span className="text-[#3d4858]"> {r.tooth}</span>}
+            {r.details?.category && <span className="font-normal text-sub">{r.details.category} › </span>}
+            {canEdit && !r.act_id ? <button type="button" onClick={() => setEd({ title: r.title ?? r.diagnosis ?? '', tooth: r.tooth ?? '', description: r.description ?? '' })} className="text-left hover:text-primary-hover" title="Nomini o‘zgartirish">{title}</button> : title}{r.tooth && <span className="text-[#3d4858]"> {r.tooth}</span>}
             {r.act_status === 'cancelled' && <span className="ml-2 rounded-full bg-bad-soft px-2 py-0.5 align-middle text-xs font-medium text-bad">akt bekor qilingan</span>}
           </h3>
           <span className="text-xs"><span className="text-primary-hover">{memberName(r.doctor_id)}</span><span className="ml-3 text-sub">{dmyhm(r.created_at)}</span></span>
@@ -171,12 +201,13 @@ function StageCard({ r, p, canEdit, meId, isOwner }: { r: HRecord; p: Patient; c
         </div>
       )}
 
-      {(r.description || r.files.length > 0 || r.mats.length > 0) && !ed && (
+      {r.details?.kind === 'works' && !ed && <WorksBlock r={r} />}
+      {(r.description || r.files.length > 0 || (r.mats.length > 0 && !r.details)) && !ed && (
         <div className="border-t border-line bg-[#f7f9fa] px-4 py-3">
           <EntryHead uid={r.doctor_id} at={r.created_at} />
           <div className="flex flex-col gap-2.5 pl-11">
             {r.description && <p className="m-0 text-sm leading-relaxed whitespace-pre-wrap text-[#3d4858]">{r.description}</p>}
-            {r.mats.length > 0 && (
+            {r.mats.length > 0 && !r.details && (
               <div className="overflow-hidden rounded-lg border border-line bg-white">
                 <div className="bg-surface px-3 py-1.5 text-xs font-semibold text-sub">Material xarajat · ombordan chiqarildi</div>
                 {r.mats.map((m, i) => (
@@ -198,6 +229,36 @@ function StageCard({ r, p, canEdit, meId, isOwner }: { r: HRecord; p: Patient; c
       <Confirm open={askDel} danger yes="O‘chirish" loading={del.isPending} onNo={() => setAskDel(false)} onYes={() => del.mutate(undefined)}
         text={`«${title}» bosqichi, undagi izohlar va rasmlar o‘chirilsinmi? Buni qaytarib bo‘lmaydi.`} />
     </section>
+  );
+}
+
+/** Material xarajat kartasi: ish(lar) va narxi, tishlar, materiallar guruhlar bo'yicha. */
+function WorksBlock({ r }: { r: HRecord }) {
+  const d = r.details!;
+  return (
+    <div className="border-t border-line bg-[#f7f9fa] px-4 py-3">
+      <EntryHead uid={r.doctor_id} at={r.created_at} />
+      <div className="flex flex-col gap-2.5 pl-11">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[#3d4858]">
+          {d.works.map((w, i) => <span key={i}><b className="font-medium text-fg">{w.name}</b> — {money(w.price)} so‘m</span>)}
+          {d.tooth && <span className="rounded-full bg-[#e6f6fc] px-2 py-0.5 text-xs font-semibold text-[#075985]">🦷 {d.tooth}</span>}
+          <span className="rounded-full bg-ok-soft px-2 py-0.5 text-xs font-medium text-[#166534]">Material xarajat</span>
+        </div>
+        {d.groups.length > 0 && (
+          <div className="overflow-hidden rounded-lg border border-line bg-white">
+            {d.groups.map((g) => (
+              <div key={g.name} className="border-t border-muted first:border-t-0">
+                <div className="bg-surface px-3 py-1.5 text-xs font-semibold text-sub">{g.name}</div>
+                {g.items.map((it, i) => (
+                  <div key={i} className="flex justify-between gap-3 border-t border-muted px-3 py-1.5 text-sm"><span>{it.name}</span><b className="font-semibold tabular-nums">{fq(it.qty)} {it.unit}</b></div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+        {d.groups.length === 0 && <span className="text-xs text-sub">Material ishlatilmagan</span>}
+      </div>
+    </div>
   );
 }
 

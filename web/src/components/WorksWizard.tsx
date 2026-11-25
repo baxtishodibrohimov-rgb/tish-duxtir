@@ -108,7 +108,9 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
   };
 
   const accept = useAction(() => {
-    const body = { items: [workId], tooth: tooth || null, materials: chosen.map(([product_id, qty]) => ({ product_id, qty })), warehouse_id: c?.warehouse_id ?? null };
+    const grpOf = new Map<string, string>();
+    for (const g of groups) for (const x of g.cards) grpOf.set(x.product_id, g.name);
+    const body = { items: [workId], tooth: tooth || null, materials: chosen.map(([product_id, qty]) => ({ product_id, qty, group: grpOf.get(product_id) ?? null })), warehouse_id: c?.warehouse_id ?? null };
     return visit ? http.post<{ left: { product_id: string; qty: number }[] }>(`/api/visits/${visit.id}/works`, body)
       : http.post<{ left: { product_id: string; qty: number }[] }>(`/api/patients/${patient.id}/works`, { ...body, branch_id: branchId });
   }, {

@@ -21,7 +21,7 @@ export async function historyRoutes(app: FastifyInstance) {
     const m = requireMember(req);
     if (!can(m, 'patients.view')) throw forbidden();
     return tx(m.user_id, (c) => many(c, `
-      select r.id, r.title, r.diagnosis, r.description, r.tooth, r.doctor_id, r.branch_id, r.created_at, r.act_id,
+      select r.id, r.title, r.details, r.diagnosis, r.description, r.tooth, r.doctor_id, r.branch_id, r.created_at, r.act_id,
              a.status act_status,
              coalesce((select json_agg(json_build_object('name', p.name, 'unit', p.unit, 'qty', l.qty) order by l.position)
                          from stock_docs d join stock_doc_lines l on l.doc_id = d.id join products p on p.id = l.product_id
@@ -35,7 +35,7 @@ export async function historyRoutes(app: FastifyInstance) {
                          from record_comments k where k.record_id = r.id), '[]') comments
         from treatment_records r left join acts a on a.id = r.act_id
        where r.patient_id = $1 and r.org_id = $2
-       order by r.created_at desc`, [req.params.id, m.org_id]));
+       order by r.created_at`, [req.params.id, m.org_id]));
   });
 
   app.post<{ Params: { id: string } }>('/api/records/:id/comments', async (req) => {
