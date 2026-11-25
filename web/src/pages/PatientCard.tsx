@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownToLine, ArrowUpFromLine, FolderOpen, Zap, ArrowLeft, CalendarDays, CalendarPlus, FilePen, Bell, Printer, Trash2, Pencil, Upload, FileText, Lock, Wallet, X, AlertTriangle, IdCard, Plus, UserRound } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, FolderOpen, Info, Zap, ArrowLeft, CalendarDays, CalendarPlus, FilePen, Bell, Printer, Trash2, Pencil, Upload, FileText, Lock, Wallet, X, AlertTriangle, IdCard, Plus, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
@@ -38,8 +38,9 @@ export function PatientCard({ id }: { id: string }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const tab: Tab = (tab0 as string) === 'files' ? 'docs' : tab0;
   const { members, memberName, me } = useOrg();
-  // Tezkor akt bir marta ochiladi: rejalardan chiqilgach qayta ochilmasin.
-  useEffect(() => { if (tab0 !== 'plans') setQuick(null); }, [tab0]);
+  // Tezkor akt / qabulga yozish bir marta ochiladi: bo'limdan chiqilgach qayta ochilmasin.
+  const [book, setBook] = useState(false);
+  useEffect(() => { if (tab0 !== 'plans') setQuick(null); if (tab0 !== 'visits') setBook(false); }, [tab0]);
   const sum = useQuery({ queryKey: ['patients', 'summary', id], queryFn: () => http.get<Summary>(`/api/patients/${id}/summary`) });
   useTitle(sum.data?.patient.full_name ?? 'Bemor');
 
@@ -91,11 +92,11 @@ export function PatientCard({ id }: { id: string }) {
       <Link to="/patients" className="inline-flex items-center gap-1.5 self-start text-sm !text-sub no-underline print:hidden"><ArrowLeft size={15} /> Orqaga</Link>
       {tab === 'info' && <NewPatient patient={p} onDone={() => setTab('visits')} />}
       {tab === 'tasks' && <TasksTab p={p} />}
-      {tab === 'visits' && <VisitsTab p={p} />}
+      {tab === 'visits' && <VisitsTab p={p} openNew={book} />}
       {tab === 'plans' && <Plans patient={p} quickAct={quick ?? undefined} />}
       {tab === 'history' && <HistoryTab p={p} />}
       {tab === 'docs' && <FilesTab p={p} />}
-      {tab === 'finance' && <FinanceTab p={p} s={sum.data!} openPay={jump.pay} payDoctor={jump.doctor} onQuickAct={() => { setQuick({ doctor: me.role === 'doctor' || me.role === 'owner' ? me.user_id : null }); setTab('plans'); }} />}
+      {tab === 'finance' && <FinanceTab p={p} s={sum.data!} openPay={jump.pay} payDoctor={jump.doctor} onQuickAct={() => { setQuick({ doctor: me.role === 'doctor' || me.role === 'owner' ? me.user_id : null }); setTab('plans'); }} onBook={() => { setBook(true); setTab('visits'); }} />}
     </main>
   );
 }
@@ -137,13 +138,13 @@ function TasksTab({ p }: { p: Patient }) {
 interface Note { id: string; patient_id: string; note_date: string; text: string; created_by: string | null }
 type Item = { kind: 'visit'; at: string; v: Visit } | { kind: 'note'; at: string; n: Note } | { kind: 'rem'; at: string; r: Reminder };
 
-function VisitsTab({ p }: { p: Patient }) {
+function VisitsTab({ p, openNew }: { p: Patient; openNew?: boolean }) {
   const { branch, members, memberName, can, me } = useOrg();
   const visits = useList<Visit>('visits', { patient_id: p.id }, { order: 'starts_at' });
   const notes = useList<Note>('patient_notes', { patient_id: p.id });
   const rems = useList<Reminder>('reminders', { patient_id: p.id, 'status.in': ['planned', 'done', 'sent'] });
   const rooms = useList<Room>('rooms', { branch_id: branch.id, is_active: true });
-  const [vm, setVm] = useState<{ visit?: Visit } | null>(null);
+  const [vm, setVm] = useState<{ visit?: Visit } | null>(openNew ? {} : null);
   const [md, setMd] = useState<{ kind: 'note' | 'rem'; id?: string; date: string; text: string } | null>(null);
   const [askDel, setAskDel] = useState<string | null>(null);
   const items = useMemo<Item[]>(() => [
@@ -349,8 +350,8 @@ function FilesTab({ p }: { p: Patient }) {
 interface Move { id: string; kind: string; amount: number; cashbox_id: string; moved_at: string; note: string | null; act_id: string | null; doctor_id: string | null; created_by: string | null }
 type FinSub = 'all' | 'works' | 'pays' | 'acts';
 
-function FinanceTab({ p, s, openPay, payDoctor, onQuickAct }: { p: Patient; s: Summary; openPay?: boolean; payDoctor?: string | null; onQuickAct: () => void }) {
-  const { can, branch, me, memberName, members, branches, org } = useOrg();
+function FinanceTab({ p, s, openPay, payDoctor, onQuickAct, onBook }: { p: Patient; s: Summary; openPay?: boolean; payDoctor?: string | null; onQuickAct: () => void; onBook: () => void }) {
+  const { can, branch, me, memberName, branches, org } = useOrg();
   const acts = useList<Act>('acts', { patient_id: p.id });
   const actIds = (acts.data ?? []).map((a) => a.id);
   const items = useList<ActItem>('act_items', { 'act_id.in': actIds }, { enabled: actIds.length > 0 });
@@ -379,16 +380,21 @@ function FinanceTab({ p, s, openPay, payDoctor, onQuickAct }: { p: Patient; s: S
   const debt = s.billed - s.paid;
   const itemsOf = (id: string) => (items.data ?? []).filter((i) => i.act_id === id);
   const totalOf = (a: Act) => itemsOf(a.id).reduce((x, i) => x + i.qty * i.price, 0) - a.discount;
-  const color = (uid: string | null) => members.find((m) => m.user_id === uid)?.color ?? '#94a3b8';
 
-  // Aktlar va to'lovlar sana bo'yicha bitta qatorga; har qatordan keyingi balans (to'langan − bajarilgan).
+  // Kun bo'yicha qatorlar: chapda shu kungi aktlar, o'ngda to'lovlar; balans — kun oxiridagi qatorda.
   const ledger = useMemo(() => {
-    const ev: ({ t: 'act'; at: string; a: Act; sum: number } | { t: 'pay'; at: string; m: Move; sum: number })[] = [];
-    for (const a of acts.data ?? []) if (a.status !== 'draft') ev.push({ t: 'act', at: `${a.act_date}T00:00:00|${a.created_at ?? ''}`, a, sum: a.status === 'closed' ? totalOf(a) : 0 });
-    for (const m of moves.data ?? []) ev.push({ t: 'pay', at: `${m.moved_at.slice(0, 10)}T00:00:01|${m.moved_at}`, m, sum: m.kind === 'refund' ? -m.amount : m.amount });
-    ev.sort((x, y) => x.at.localeCompare(y.at));
+    const days = new Map<string, { acts: Act[]; pays: Move[] }>();
+    const day = (k: string) => { const v = days.get(k) ?? { acts: [], pays: [] }; days.set(k, v); return v; };
+    for (const a of acts.data ?? []) if (a.status !== 'draft') day(a.act_date).acts.push(a);
+    for (const m of moves.data ?? []) day(isoDate(new Date(m.moved_at))).pays.push(m);
     let bal = 0;
-    return ev.map((e) => { bal += e.t === 'act' ? -e.sum : e.sum; return { ...e, bal }; });
+    return [...days.entries()].sort((x, y) => x[0].localeCompare(y[0])).flatMap(([d, g]) => {
+      g.acts.sort((x, y) => (x.created_at ?? '').localeCompare(y.created_at ?? ''));
+      g.pays.sort((x, y) => x.moved_at.localeCompare(y.moved_at));
+      bal += g.pays.reduce((x, m) => x + (m.kind === 'refund' ? -m.amount : m.amount), 0) - g.acts.reduce((x, a) => x + (a.status === 'closed' ? totalOf(a) : 0), 0);
+      const n = Math.max(g.acts.length, g.pays.length);
+      return Array.from({ length: n }, (_, i) => ({ key: `${d}-${i}`, a: g.acts[i] ?? null, m: g.pays[i] ?? null, bal: i === n - 1 ? bal : null }));
+    });
   }, [acts.data, moves.data, items.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const printAct = (a: Act) => printDoc(`Akt · ${dmy(a.act_date)}`, `
@@ -409,92 +415,99 @@ function FinanceTab({ p, s, openPay, payDoctor, onQuickAct }: { p: Patient; s: S
     <tr><td>Qabul qildi</td><td>${esc(memberName(m.created_by))}</td></tr></table>
     <p class="muted">Bemor balansi: ${debt > 0 ? `qarz ${money(debt)}` : debt < 0 ? `avans ${money(-debt)}` : '0'} so‘m</p>`);
 
-  const IC = 'grid h-7 w-7 flex-none place-items-center rounded-md text-white';
+  const IC = 'grid h-[26px] w-[26px] flex-none place-items-center rounded-[3px] text-white';
+  const HC = 'border border-line bg-white px-3 py-2.5 font-normal';
+  const CELL = 'border border-line bg-white px-3 py-2';
   const SUBS: [FinSub, string][] = [['all', 'To‘lovlar va aktlar'], ['works', 'Bajarilgan ishlar'], ['pays', 'To‘lovlar'], ['acts', 'Aktlar']];
   const closedItems = (acts.data ?? []).filter((a) => a.status === 'closed').flatMap((a) => itemsOf(a.id).map((i) => ({ a, i })))
     .sort((x, y) => y.a.act_date.localeCompare(x.a.act_date));
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="flex gap-1">
-          {edit && <button type="button" onClick={onQuickAct} aria-label="Tezkor akt" title="Tezkor akt (davolash rejasida)" className="grid h-10 w-11 place-items-center rounded-md bg-primary text-white hover:bg-primary-hover"><Zap size={18} /></button>}
-          {cash && <button type="button" onClick={() => setPay({})} aria-label="To‘lov qabul qilish" title="To‘lov qabul qilish" className="grid h-10 w-11 place-items-center rounded-md bg-ok text-white hover:opacity-90"><ArrowDownToLine size={18} /></button>}
-          {cash && <button type="button" onClick={() => setPay({ refund: true })} aria-label="Pulni qaytarish" title="Pulni qaytarish" className="grid h-10 w-11 place-items-center rounded-md bg-bad text-white hover:opacity-90"><ArrowUpFromLine size={18} /></button>}
-        </span>
-        <div role="tablist" className="flex overflow-x-auto rounded-md border border-line bg-white [scrollbar-width:none]">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {edit && <button type="button" onClick={onQuickAct} className="inline-flex h-10 items-center gap-1.5 rounded-[3px] bg-primary px-3.5 text-[15px] text-white hover:bg-primary-hover"><Zap size={17} /> Tezkor akt yaratish</button>}
+        {cash && <button type="button" onClick={() => setPay({})} className="inline-flex h-10 items-center gap-1.5 rounded-[3px] bg-ok px-3.5 text-[15px] text-white hover:opacity-90"><ArrowDownToLine size={17} /> To‘lov qabul qilish</button>}
+        {cash && <button type="button" onClick={() => setPay({ refund: true })} aria-label="Pulni qaytarish" title="Pulni qaytarish" className="grid h-10 w-11 place-items-center rounded-[3px] bg-bad text-white hover:opacity-90"><ArrowUpFromLine size={18} /></button>}
+        <div role="tablist" className="flex overflow-x-auto rounded-[3px] border border-line bg-white [scrollbar-width:none]">
           {SUBS.map(([k, l]) => (
             <button key={k} type="button" role="tab" aria-selected={sub === k} onClick={() => setSub(k)}
-              className={cx('h-10 flex-none border-r border-line px-3.5 text-sm whitespace-nowrap last:border-r-0', sub === k ? 'bg-muted font-medium text-fg' : 'text-[#3d4858] hover:bg-surface')}>{l}</button>
+              className={cx('h-10 flex-none border-r border-line px-3.5 text-[15px] whitespace-nowrap last:border-r-0', sub === k ? 'bg-muted text-fg' : 'text-[#3d4858] hover:bg-surface')}>{l}</button>
           ))}
         </div>
-        <span className={cx('ml-auto text-lg font-semibold', debt > 0 ? 'text-bad' : debt < 0 ? 'text-ok' : 'text-sub')}>
-          {debt > 0 ? `Qarz: ${som(debt)}` : debt < 0 ? `Avans: ${som(-debt)}` : 'Balans: 0'}
+        {can('schedule.edit', branch.id) && <button type="button" onClick={onBook} className="inline-flex h-10 items-center gap-1.5 rounded-[3px] bg-primary px-3.5 text-[15px] text-white hover:bg-primary-hover"><CalendarPlus size={17} /> Qabulga yozish</button>}
+        <span className={cx('ml-auto text-[15px]', debt > 0 ? 'text-bad' : debt < 0 ? 'text-ok' : 'text-sub')}>
+          {debt > 0 ? `Qarz: ${money(debt)}` : debt < 0 ? `Avans: ${money(-debt)}` : 'Balans: 0'}
         </span>
       </div>
 
       {sub === 'all' && (
-        <Card className="overflow-x-auto">
-          <table className="w-full min-w-[720px] border-collapse text-sm">
-            <thead><tr className="text-left text-[15px] text-[#3d4858]">
-              <th className="border-b border-line px-3 py-2.5 font-normal" colSpan={2}>Bajarilgan ishlar aktlari</th>
-              <th className="w-[1%] border-b border-r border-line" />
-              <th className="border-b border-line px-3 py-2.5 font-normal" colSpan={2}>To‘lovlar</th>
-              <th className="w-[1%] border-b border-r border-line" />
-              <th className="w-36 border-b border-line px-3 py-2.5 text-right font-normal">Balans</th>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] border-collapse text-[15px]">
+            <thead><tr className="text-left text-lg font-normal text-[#3d4858]">
+              <th className={HC} colSpan={2}>Bajarilgan ishlar aktlari <Info size={13} className="inline align-baseline text-faint" /></th>
+              <th className={cx(HC, 'w-[1%] text-center')}><FolderOpen size={17} className="inline text-sub" /></th>
+              <th className="w-2" />
+              <th className={HC} colSpan={2}>To‘lovlar <Info size={13} className="inline align-baseline text-faint" /></th>
+              <th className={cx(HC, 'w-[1%]')} />
+              <th className="w-2" />
+              <th className={cx(HC, 'w-40')}>Balans <Info size={13} className="inline align-baseline text-faint" /></th>
             </tr></thead>
             <tbody>
-              {ledger.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-sub">Hali akt va to‘lov yo‘q</td></tr>}
-              {ledger.map((e) => {
-                const isAct = e.t === 'act';
-                const a = isAct ? e.a : null, m = !isAct ? e.m : null;
-                return [
-                  <tr key={isAct ? a!.id : m!.id} className="border-b border-line">
-                    {a ? <>
-                      <td className={cx('w-28 px-3 py-2', a.status === 'cancelled' && 'text-faint line-through')}>{dmy(a.act_date)}</td>
-                      <td className={cx('px-3 py-2 text-right tabular-nums', a.status === 'cancelled' && 'text-faint line-through')}>{money(totalOf(a))}</td>
-                      <td className="border-r border-line px-2 py-1.5">
-                        <span className="flex gap-1">
-                          <button type="button" onClick={() => setOpen(open === a.id ? null : a.id)} aria-label="Aktni ochish" title="Ishlar ro‘yxati" className={cx(IC, 'bg-primary')}><FolderOpen size={14} /></button>
-                          <button type="button" onClick={() => printAct(a)} aria-label="Aktni chop etish" title="Chop etish" className={cx(IC, 'bg-primary')}><Printer size={14} /></button>
-                          <span title={`Shifokor: ${memberName(a.doctor_id)}`} className={cx(IC, 'text-[10px] font-semibold')} style={{ background: color(a.doctor_id) }}>{initials(memberName(a.doctor_id))}</span>
-                          {a.status === 'closed' && can('patients.edit', a.branch_id) && <button type="button" onClick={() => setCancel(a)} aria-label="Aktni bekor qilish" title="Bekor qilish" className={cx(IC, 'bg-bad')}><Trash2 size={14} /></button>}
-                        </span>
-                      </td>
-                    </> : <><td /><td /><td className="border-r border-line" /></>}
-                    {m ? <>
-                      <td className="w-28 px-3 py-2">{dmy(m.moved_at)}<div className="text-[11px] text-sub">{cbmap.get(m.cashbox_id)?.name ?? ''}</div></td>
-                      <td className={cx('px-3 py-2 text-right font-medium tabular-nums', m.kind === 'refund' ? 'text-bad' : 'text-fg')}>{m.kind === 'refund' ? '−' : ''}{money(m.amount)}</td>
-                      <td className="border-r border-line px-2 py-1.5">
-                        <span className="flex gap-1">
-                          <button type="button" onClick={() => printMove(m)} aria-label="Chekni chop etish" title="Chek" className={cx(IC, 'bg-primary')}><Printer size={14} /></button>
-                          {m.doctor_id && <span title={`Shifokor: ${memberName(m.doctor_id)}`} className={cx(IC, 'text-[10px] font-semibold')} style={{ background: color(m.doctor_id) }}>{initials(memberName(m.doctor_id))}</span>}
-                          {cash && <button type="button" onClick={() => setDelMove(m)} aria-label="To‘lovni bekor qilish" title="Bekor qilish" className={cx(IC, 'bg-bad')}><Trash2 size={14} /></button>}
-                        </span>
-                      </td>
-                    </> : <><td /><td /><td className="border-r border-line" /></>}
-                    <td className={cx('px-3 py-2 text-right font-medium tabular-nums', e.bal < 0 ? 'text-bad' : e.bal > 0 ? 'text-ok' : 'text-sub')}>{e.bal > 0 ? '+' : ''}{money(e.bal)}</td>
-                  </tr>,
-                  a && open === a.id && (
-                    <tr key={`${a.id}-x`} className="border-b border-line bg-surface">
-                      <td colSpan={7} className="px-4 py-2">
-                        {itemsOf(a.id).map((i) => (
-                          <div key={i.id} className="flex justify-between gap-3 py-0.5 text-[13px]"><span>{i.tooth && <b className="mr-1 font-medium">№{i.tooth} —</b>}{i.name}{i.qty > 1 && ` × ${i.qty}`}</span><span className="tabular-nums">{money(i.qty * i.price)}</span></div>
-                        ))}
-                        <div className="mt-1 text-xs text-sub">{memberName(a.doctor_id)} · {bmap.get(a.branch_id)?.name ?? ''}{a.discount ? ` · chegirma ${money(a.discount)}` : ''}</div>
-                      </td>
-                    </tr>
-                  ),
-                ];
-              })}
+              {ledger.length === 0 && <tr><td colSpan={9} className="border border-line bg-white p-8 text-center text-sub">Hali akt va to‘lov yo‘q</td></tr>}
+              {ledger.map(({ key, a, m, bal }) => [
+                <tr key={key}>
+                  {a ? <>
+                    <td className={cx(CELL, 'w-28', a.status === 'cancelled' && 'text-faint line-through')}>{dmy(a.act_date)}</td>
+                    <td className={cx(CELL, 'text-right tabular-nums', a.status === 'cancelled' && 'text-faint line-through')}>{money(totalOf(a))}</td>
+                    <td className={cx(CELL, 'px-2')}>
+                      <span className="flex gap-1">
+                        <button type="button" onClick={() => setOpen(open === a.id ? null : a.id)} aria-label="Aktni ochish" title="Ishlar ro‘yxati" className={cx(IC, 'bg-primary')}><FolderOpen size={13} /></button>
+                        <button type="button" onClick={() => printAct(a)} aria-label="Aktni chop etish" title="Chop etish" className={cx(IC, 'bg-primary')}><Printer size={13} /></button>
+                        <span title={`Shifokor: ${memberName(a.doctor_id)}`} className={cx(IC, 'bg-primary')}><UserRound size={13} /></span>
+                        {a.status === 'closed' && can('patients.edit', a.branch_id)
+                          ? <button type="button" onClick={() => setCancel(a)} aria-label="Aktni bekor qilish" title="Bekor qilish" className={cx(IC, 'bg-bad')}><Trash2 size={13} /></button>
+                          : <span className={cx(IC, 'bg-bad opacity-30')}><Trash2 size={13} /></span>}
+                      </span>
+                    </td>
+                  </> : <><td /><td /><td /></>}
+                  <td />
+                  {m ? <>
+                    <td className={cx(CELL, 'w-28')} title={cbmap.get(m.cashbox_id)?.name ?? ''}>{dmy(m.moved_at)}</td>
+                    <td className={cx(CELL, 'text-right tabular-nums', m.kind === 'refund' && 'text-bad')}>{m.kind === 'refund' ? '−' : ''}{money(m.amount)}</td>
+                    <td className={cx(CELL, 'px-2')}>
+                      <span className="flex gap-1">
+                        <button type="button" onClick={() => printMove(m)} aria-label="Chekni chop etish" title="Chek" className={cx(IC, 'bg-primary')}><Printer size={13} /></button>
+                        <span title={`${cbmap.get(m.cashbox_id)?.name ?? ''} · ${m.doctor_id ? memberName(m.doctor_id) : 'shifokor ko‘rsatilmagan'}`} className={cx(IC, 'bg-primary')}><UserRound size={13} /></span>
+                        {cash ? <button type="button" onClick={() => setDelMove(m)} aria-label="To‘lovni bekor qilish" title="Bekor qilish" className={cx(IC, 'bg-bad')}><Trash2 size={13} /></button>
+                          : <span className={cx(IC, 'bg-bad opacity-30')}><Trash2 size={13} /></span>}
+                      </span>
+                    </td>
+                  </> : <><td /><td /><td /></>}
+                  <td />
+                  <td className={cx(CELL, 'text-right tabular-nums', bal !== null && bal < 0 && 'text-bad', bal !== null && bal > 0 && 'text-ok')}>{bal !== null ? money(bal) : ''}</td>
+                </tr>,
+                a && open === a.id && (
+                  <tr key={`${key}-x`}>
+                    <td colSpan={3} className="border border-t-0 border-line bg-surface px-4 py-2">
+                      {itemsOf(a.id).map((i) => (
+                        <div key={i.id} className="flex justify-between gap-3 py-0.5 text-[13px]"><span>{i.tooth && <b className="mr-1 font-medium">№{i.tooth} —</b>}{i.name}{i.qty > 1 && ` × ${i.qty}`}</span><span className="tabular-nums">{money(i.qty * i.price)}</span></div>
+                      ))}
+                      <div className="mt-1 text-xs text-sub">{memberName(a.doctor_id)} · {bmap.get(a.branch_id)?.name ?? ''}{a.discount ? ` · chegirma ${money(a.discount)}` : ''}</div>
+                    </td>
+                    <td colSpan={6} />
+                  </tr>
+                ),
+              ])}
+              <tr className="text-[17px]">
+                <td colSpan={3} className="pt-4 pr-3 text-right">Bajarildi: <b className="font-semibold">{money(s.billed)}</b></td>
+                <td />
+                <td colSpan={3} className="pt-4 pr-3 text-right">To‘landi: <b className="font-semibold">{money(s.paid)}</b></td>
+                <td />
+                <td className={cx('pt-4 pr-3 text-right font-semibold whitespace-nowrap', debt > 0 ? 'text-bad' : debt < 0 ? 'text-ok' : 'text-sub')}>{debt > 0 ? `Qarz: ${money(debt)}` : debt < 0 ? `Avans: ${money(-debt)}` : 'Balans: 0'}</td>
+              </tr>
             </tbody>
           </table>
-          <div className="flex flex-wrap justify-end gap-x-10 gap-y-1 border-t border-line px-4 py-3 text-[15px]">
-            <span>Bajarildi: <b className="font-semibold">{money(s.billed)}</b></span>
-            <span>To‘landi: <b className="font-semibold">{money(s.paid)}</b></span>
-            <span className={cx('font-semibold', debt > 0 ? 'text-bad' : debt < 0 ? 'text-ok' : 'text-sub')}>{debt > 0 ? `Qarz: ${money(debt)}` : debt < 0 ? `Avans: ${money(-debt)}` : 'Balans: 0'}</span>
-          </div>
-        </Card>
+        </div>
       )}
 
       {sub === 'works' && (
