@@ -71,7 +71,10 @@ export function Schedule() {
   const [now, setNow] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 60_000); return () => clearInterval(t); }, []);
 
-  const days = useMemo(() => Array.from({ length: view.days }, (_, i) => addDays(start, i)), [start, view.days]);
+  // Telefonda (tor ekran) har doim 1 kun: 3 kun sig'maydi, ustunlar juda torayib ketadi.
+  const narrow = useMedia('(max-width: 767px)');
+  const nDays = narrow ? 1 : view.days;
+  const days = useMemo(() => Array.from({ length: nDays }, (_, i) => addDays(start, i)), [start, nDays]);
   const from = new Date(days[0]!.getFullYear(), days[0]!.getMonth(), days[0]!.getDate()).toISOString();
   const to = new Date(days[days.length - 1]!.getFullYear(), days[days.length - 1]!.getMonth(), days[days.length - 1]!.getDate() + 1).toISOString();
 
@@ -153,8 +156,8 @@ export function Schedule() {
       )}
 
       <div className="w-full overflow-hidden bg-white print:overflow-visible">
-        <div className="overflow-auto print:overflow-visible" style={{ height: 'calc(100vh - 45px)', minHeight: 480 }}>
-          <div style={{ minWidth: view.scale === 'fit' ? undefined : Math.max(960, 44 + days.length * cols.length * 150) }}>
+        <div className="h-[calc(100dvh-45px-60px-env(safe-area-inset-bottom))] min-h-[420px] overflow-auto md:h-[calc(100vh-45px)] md:min-h-[480px] print:h-auto print:overflow-visible">
+          <div style={{ minWidth: view.scale === 'fit' ? undefined : narrow ? 44 + cols.length * 130 : Math.max(960, 44 + days.length * cols.length * 150) }}>
             {/* Sarlavha */}
             <div className="sticky top-0 z-30 flex border-b border-line bg-[#f0f4f7]">
               <div className="grid w-11 flex-none place-items-center border-r border-line">
@@ -621,8 +624,10 @@ function ViewSettings({ view, rooms, viewBr, ownBr, onClose, onSave }: { view: V
 }
 
 /** Faqat sensorli ekran (telefon, planshet): asosiy kiritish barmoq, sichqoncha/trackpad yo'q. */
-function useTouchOnly() {
-  const q = '(hover: none) and (pointer: coarse)';
+function useTouchOnly() { return useMedia('(hover: none) and (pointer: coarse)'); }
+
+/** CSS media so'rovi mos keladimi (ekran o'lchami/turi o'zgarsa yangilanadi). */
+function useMedia(q: string) {
   const get = () => typeof window !== 'undefined' && !!window.matchMedia?.(q).matches;
   const [v, setV] = useState(get);
   useEffect(() => {
@@ -631,6 +636,6 @@ function useTouchOnly() {
     const on = () => setV(m.matches);
     m.addEventListener?.('change', on);
     return () => m.removeEventListener?.('change', on);
-  }, []);
+  }, [q]);
   return v;
 }

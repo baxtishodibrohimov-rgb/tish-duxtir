@@ -41,13 +41,13 @@ export function PatientCard({ id }: { id: string }) {
   const docColor = members.find((m) => m.user_id === doc)?.color ?? '#00a1db';
 
   return (
-    <main className="flex flex-col gap-4 px-3 pt-2.5 pb-6">
-      <section className="app-card flex items-stretch gap-4 rounded-md border border-l-4 border-line bg-white pt-2 pr-5 pl-2"
+    <main className="flex flex-col gap-4 px-2 pt-2 pb-6 sm:px-3 sm:pt-2.5">
+      <section className="app-card flex flex-wrap items-stretch gap-x-4 gap-y-1 rounded-md border border-l-4 border-line bg-white pt-2 pr-3 pl-2 md:flex-nowrap md:pr-5"
         style={{ borderLeftColor: debt > 0 ? '#dc2626' : '#15803d' }}>
-        <div className="grid h-[110px] w-28 flex-none place-items-end self-end overflow-hidden rounded-t bg-muted">
-          {p.photo_file_id ? <img src={`/api/files/${p.photo_file_id}`} alt="" className="h-full w-full object-cover" /> : <UserRound size={96} strokeWidth={1} className="-mb-3 fill-[#cfd8de] text-[#cfd8de]" />}
+        <div className="grid h-[76px] w-[68px] flex-none place-items-end self-start overflow-hidden rounded bg-muted md:h-[110px] md:w-28 md:self-end md:rounded-b-none">
+          {p.photo_file_id ? <img src={`/api/files/${p.photo_file_id}`} alt="" className="h-full w-full object-cover" /> : <UserRound strokeWidth={1} className="-mb-2 h-[64px] w-[64px] fill-[#cfd8de] text-[#cfd8de] md:-mb-3 md:h-24 md:w-24" />}
         </div>
-        <div className="flex min-w-0 flex-1 flex-col justify-between pt-2 pb-3">
+        <div className="flex min-w-0 flex-1 flex-col justify-between gap-1 pt-1 pb-1 md:pt-2 md:pb-3">
           <span className="text-sm text-sub">{p.card_number}</span>
           <div className="flex flex-col gap-1">
             <h1 className="m-0 text-lg font-semibold" style={{ color: debt > 0 ? '#dc2626' : undefined }}>
@@ -56,18 +56,18 @@ export function PatientCard({ id }: { id: string }) {
             {p.phone && <a href={`tel:+${p.phone.replace(/\D/g, '')}`} className="text-sm !text-sub no-underline">{phoneShow(p.phone)}</a>}
           </div>
         </div>
-        <div className="flex flex-col items-end justify-between gap-2 pt-2">
-          <div className="flex items-center gap-3.5">
+        <div className="flex w-full flex-col items-stretch gap-1 md:w-auto md:items-end md:justify-between md:gap-2 md:pt-2">
+          <div className="flex flex-wrap items-center gap-2.5 md:justify-end md:gap-3.5">
             {debt > 0 && <Badge tone="red">Qarz: {som(debt)}</Badge>}
             {debt < 0 && <Badge tone="green">Avans: {som(-debt)}</Badge>}
             {doc && <span title={`Kurator: ${memberName(doc)}`} className="grid h-9 w-9 place-items-center rounded-full text-xs font-semibold text-white" style={{ background: docColor }}>{initials(memberName(doc))}</span>}
             <button type="button" onClick={() => setTab(tab === 'info' ? 'visits' : 'info')} aria-label="Bemor ma‘lumotlari" title="Bemor ma‘lumotlari"
               className={cx('grid h-9 w-9 place-items-center rounded-md text-sub hover:bg-muted', tab === 'info' && 'bg-muted')}><IdCard size={22} /></button>
           </div>
-          <div role="tablist" className="flex flex-wrap justify-end">
+          <div role="tablist" className="-mx-1 flex overflow-x-auto [scrollbar-width:none] md:mx-0 md:flex-wrap md:justify-end md:overflow-visible">
             {TABS.map((t) => (
               <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
-                className={cx('-mb-px h-10 border-b-[3px] px-4 text-[15px] whitespace-nowrap', tab === t.key ? 'border-primary text-fg' : 'border-transparent text-[#3d4858] hover:text-fg')}>{t.label}</button>
+                className={cx('-mb-px h-10 flex-none border-b-[3px] px-3 text-[15px] whitespace-nowrap md:px-4', tab === t.key ? 'border-primary text-fg' : 'border-transparent text-[#3d4858] hover:text-fg')}>{t.label}</button>
             ))}
           </div>
         </div>
@@ -169,7 +169,7 @@ function VisitsTab({ p }: { p: Patient }) {
             const canDel = it.kind === 'visit' ? editV : editP;
             return (
               <div key={key} className="contents">
-                <div className="flex min-h-10 items-center gap-3.5 rounded-[3px] border border-[#e6ecf0] bg-white px-2.5 text-[15px]">
+                <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 rounded-[3px] border border-[#e6ecf0] bg-white px-2.5 py-1.5 text-[15px] sm:flex-nowrap sm:gap-3.5 sm:py-0">
                   <span className={cx(ICON, it.kind === 'visit' ? 'bg-primary' : it.kind === 'note' ? 'bg-[#15803d]' : 'bg-[#b45309]')}>
                     {it.kind === 'visit' ? <CalendarDays size={16} /> : it.kind === 'note' ? <FilePen size={16} /> : <Bell size={16} />}
                   </span>
@@ -184,9 +184,9 @@ function VisitsTab({ p }: { p: Patient }) {
                       <span className="truncate">{memberName(it.v.doctor_id)}</span>
                     </span>
                   )}
-                  {st && <span className="flex h-6 w-[166px] flex-none items-center justify-center rounded-[3px] text-sm text-white" style={{ background: st.color }}>{st.label}</span>}
-                  {it.kind === 'rem' && <span className="flex h-6 w-[166px] flex-none items-center justify-center rounded-[3px] bg-[#b45309] text-sm text-white">{it.r.status === 'done' ? 'Bajarildi' : 'Eslatma'}</span>}
-                  {it.kind === 'note' && <span className="flex h-6 w-[166px] flex-none items-center justify-center rounded-[3px] bg-[#15803d] text-sm text-white">Izoh</span>}
+                  {st && <span className="flex h-6 flex-none px-3 sm:w-[166px] sm:px-0 items-center justify-center rounded-[3px] text-sm text-white" style={{ background: st.color }}>{st.label}</span>}
+                  {it.kind === 'rem' && <span className="flex h-6 flex-none px-3 sm:w-[166px] sm:px-0 items-center justify-center rounded-[3px] bg-[#b45309] text-sm text-white">{it.r.status === 'done' ? 'Bajarildi' : 'Eslatma'}</span>}
+                  {it.kind === 'note' && <span className="flex h-6 flex-none px-3 sm:w-[166px] sm:px-0 items-center justify-center rounded-[3px] bg-[#15803d] text-sm text-white">Izoh</span>}
                   {canDel && (askDel === key ? (
                     <span className="flex items-center gap-1.5 text-[13px]">O‘chirilsinmi? <button type="button" onClick={() => delAction.mutate(it)} className="font-medium text-bad">Ha</button><button type="button" onClick={() => setAskDel(null)} className="text-sub">Yo‘q</button></span>
                   ) : <button type="button" onClick={() => setAskDel(key)} aria-label="O‘chirish" title="O‘chirish" className={cx(ICON, 'bg-[#ef4444]')}><Trash2 size={15} /></button>)}

@@ -122,7 +122,7 @@ export function Header() {
           )}
         </div>
 
-        <nav className="flex flex-wrap items-center gap-1">
+        <nav className="hidden flex-wrap items-center gap-1 md:flex">
           {NAV.filter((n) => !n.perm || can(n.perm)).map((n) => (
             <Link key={n.to} to={n.to}
               className={cx('inline-flex h-[30px] items-center gap-1.5 rounded-[10px] px-2.5 text-sm font-medium whitespace-nowrap no-underline',
@@ -140,6 +140,12 @@ export function Header() {
         </nav>
 
         <div ref={quickRef} className="relative ml-auto flex items-center gap-1">
+          {branch && can('patients.edit') && (
+            <Link to="/patients/new" aria-label="Yangi bemor" title="Yangi bemor"
+              className={cx('grid h-[30px] w-[30px] place-items-center rounded-full !text-primary no-underline md:hidden', path === '/patients/new' ? 'bg-nav' : 'hover:bg-muted')}>
+              <UserPlus size={18} />
+            </Link>
+          )}
           {branch && can('schedule.view') && <Queue open={quick === 'queue'} onToggle={() => setQuick(quick === 'queue' ? null : 'queue')} onClose={() => setQuick(null)} />}
           {branch && can('patients.view') && <Reminders open={quick === 'reminders'} onToggle={() => setQuick(quick === 'reminders' ? null : 'reminders')} />}
         </div>
@@ -170,9 +176,23 @@ export function Header() {
           )}
         </div>
       </div>
+      {/* Telefon va kichik planshet: asosiy bo'limlar pastdagi panelda (barmoq bilan bosish qulay). */}
+      <nav aria-label="Asosiy bo‘limlar" className="fixed inset-x-0 bottom-0 z-50 flex border-t border-line bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(7,18,30,.06)] md:hidden print:hidden">
+        {NAV.filter((n) => !n.perm || can(n.perm)).map((n) => {
+          const on = active(n.to);
+          return (
+            <Link key={n.to} to={n.to} aria-current={on ? 'page' : undefined}
+              className={cx('flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-[10.5px] font-medium no-underline', on ? '!text-primary-hover' : '!text-sub')}>
+              <span className={cx('grid h-7 w-12 place-items-center rounded-full', on && 'bg-[#e6f6fc]')}><n.icon size={19} /></span>
+              <span className="max-w-full truncate">{SHORT[n.label] ?? n.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
     </header>
   );
 }
+const SHORT: Record<string, string> = { Hisobotlar: 'Hisobot', Sozlamalar: 'Sozlama' };
 
 /** Kutish navbati: bo'sh vaqt chiqsa, shu yerdan qabulga yoziladi. */
 function Queue({ open, onToggle, onClose }: { open: boolean; onToggle: () => void; onClose: () => void }) {

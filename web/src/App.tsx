@@ -53,7 +53,7 @@ export function App() {
   return (
     <div className="flex min-h-full flex-col">
       <Header />
-      <main key={branch.id} className="flex-1">{page}</main>
+      <main key={branch.id} className="flex-1 pb-[calc(60px+env(safe-area-inset-bottom))] md:pb-0 print:pb-0">{page}</main>
     </div>
   );
 }
