@@ -107,6 +107,9 @@ export function Schedule() {
   const slotH = view.scale === 'fit' ? fitPx : PX30;
   const px = (min: number) => ((min - startMin) / 30) * slotH;
   const canEdit = !RO && can('schedule.edit', branch.id);
+  // Telefon va planshetda (sensorli ekran, sichqonchasiz) sudrash va cho'zish o'chiq: tasodifiy tegish qabulni surib yubormasin.
+  const touchOnly = useTouchOnly();
+  const canDrag = canEdit && !touchOnly;
   const effDoc = view.only && view.doc ? view.doc : '';
   const showVisits = view.tab === 'doctor';
 
@@ -133,7 +136,7 @@ export function Schedule() {
   }, { invalidate: ['visits'], onDone: () => setRz(null) });
   const startResize = (e: React.PointerEvent, v: Visit) => {
     e.stopPropagation(); e.preventDefault();
-    if (roBlock(e) || !canEdit) return;
+    if (roBlock(e) || !canDrag || e.pointerType === 'touch') return;
     const y0 = e.clientY, end0 = minOf(v.ends_at), from0 = minOf(v.starts_at);
     let cur = end0;
     const mv = (ev: PointerEvent) => { cur = Math.max(from0 + 15, Math.min(endMin, end0 + Math.round(((ev.clientY - y0) / slotH) * 30 / 15) * 15)); setRz({ id: v.id, end: cur }); };
@@ -245,14 +248,14 @@ export function Schedule() {
                             return (
                               <div key={v.id}>
                                 <div role="button" tabIndex={0} aria-label={`${p?.full_name ?? ''}, ${hm(v.starts_at)}, ${VISIT_STATUS[v.status].label}`}
-                                  title={canEdit ? 'Bir marta — ma’lumot, ikki marta — qabul oynasi. Sudrab boshqa kabinet yoki vaqtga ko‘chiring, pastki chetidan cho‘zing' : 'Bir marta — ma’lumot'}
-                                  draggable={canEdit}
+                                  title={canDrag ? 'Bir marta — ma’lumot, ikki marta — qabul oynasi. Sudrab boshqa kabinet yoki vaqtga ko‘chiring, pastki chetidan cho‘zing' : 'Bir marta — ma’lumot'}
+                                  draggable={canDrag}
                                   onDragStart={(e) => { drag.current = { id: v.id, gy: e.clientY - e.currentTarget.getBoundingClientRect().top }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', v.id); setTimeout(() => { setDragId(v.id); setPop(null); }, 0); }}
                                   onDragEnd={() => { drag.current = null; setDragId(null); setOver(null); }}
                                   onClick={(e) => { e.stopPropagation(); if (roBlock(e)) return; setPop(pop === v.id ? null : v.id); setCtx(null); }}
                                   onDoubleClick={(e) => { e.stopPropagation(); if (roBlock(e)) return; setPop(null); setVm({ visit: v }); }}
                                   onKeyDown={(e) => { if (e.key === 'Enter') setVm({ visit: v }); }}
-                                  className="absolute right-0.5 left-0.5 z-10 box-border cursor-grab overflow-hidden rounded-md px-2 py-1 text-[11px] leading-tight text-[#334155] shadow-[0_1px_2px_rgba(0,0,0,.05)]"
+                                  className={cx('absolute right-0.5 left-0.5 z-10 box-border overflow-hidden', canDrag ? 'cursor-grab' : 'cursor-pointer') + ' rounded-md px-2 py-1 text-[11px] leading-tight text-[#334155] shadow-[0_1px_2px_rgba(0,0,0,.05)]'}
                                   style={{ top: px(s), height: h, border: `1px solid ${c}30`, borderLeft: `4px solid ${c}`, background: `${c}14`,
                                     opacity: dragId === v.id ? 0.4 : view.transparent && dead ? 0.45 : 1, outline: pop === v.id ? '2px solid #f59e0b' : undefined, outlineOffset: 1 }}>
                                   <div className="flex items-center justify-between gap-1">
@@ -267,7 +270,7 @@ export function Schedule() {
                                     {p?.full_name ?? '…'} <span className="text-[10px] font-normal text-[#64748b]">№{p?.card_number}</span>
                                   </div>
                                   {h >= 54 && v.comment && <div className="truncate text-[11px] text-[#334155]">{v.comment}</div>}
-                                  {canEdit && (
+                                  {canDrag && (
                                     <div onPointerDown={(e) => startResize(e, v)} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} draggable={false} title="Sudrab vaqtni cho‘zing"
                                       className="absolute right-0 bottom-0 left-0 flex h-[9px] cursor-ns-resize touch-none items-center justify-center">
                                       <span className="h-[3px] w-6 rounded-full bg-[#94a3b8]/60" />
@@ -615,4 +618,19 @@ function ViewSettings({ view, rooms, viewBr, ownBr, onClose, onSave }: { view: V
       </div>
     </div>
   );
+}
+
+/** Faqat sensorli ekran (telefon, planshet): asosiy kiritish barmoq, sichqoncha/trackpad yo'q. */
+function useTouchOnly() {
+  const q = '(hover: none) and (pointer: coarse)';
+  const get = () => typeof window !== 'undefined' && !!window.matchMedia?.(q).matches;
+  const [v, setV] = useState(get);
+  useEffect(() => {
+    const m = window.matchMedia?.(q);
+    if (!m) return;
+    const on = () => setV(m.matches);
+    m.addEventListener?.('change', on);
+    return () => m.removeEventListener?.('change', on);
+  }, []);
+  return v;
 }
