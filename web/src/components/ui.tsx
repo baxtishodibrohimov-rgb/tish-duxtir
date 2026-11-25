@@ -113,13 +113,18 @@ export function PillTabs<T extends string>({ tabs, value, onChange, small }:
 export function Modal({ open, onClose, title, children, footer, width = 520 }:
   { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; width?: number }) {
   const ref = useRef<HTMLDivElement>(null);
+  // onClose ko'pincha har chizilishda yangi funksiya bo'ladi — effekt faqat ochilganda ishlashi uchun ref orqali.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') close.current(); };
     document.addEventListener('keydown', k);
-    ref.current?.querySelector<HTMLElement>('input,select,textarea')?.focus();
+    // Fokus faqat oyna ochilganda bir marta (har harf yozilganda birinchi maydonga sakramasin).
+    const el = ref.current;
+    if (el && !el.contains(document.activeElement)) el.querySelector<HTMLElement>('[autofocus],input,select,textarea')?.focus();
     return () => document.removeEventListener('keydown', k);
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[rgba(7,18,30,.35)] p-4"
