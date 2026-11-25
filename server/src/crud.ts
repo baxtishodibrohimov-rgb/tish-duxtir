@@ -63,7 +63,7 @@ const R: Record<string, Resource> = {
   treatment_plan_items: { table: 'treatment_plan_items', scope: 'child', parent: { resource: 'treatment_plans', fk: 'plan_id' },
     read: 'patients.view', write: 'patients.edit', columns: ['plan_id', 'price_item_id', 'name', 'tooth', 'qty', 'price'], filters: ['plan_id'], order: 'id' },
   treatment_records: { table: 'treatment_records', scope: 'org', read: 'patients.view', write: 'patients.edit',
-    columns: ['branch_id', 'patient_id', 'visit_id', 'doctor_id', 'tooth', 'diagnosis', 'description'], filters: ['patient_id', 'visit_id'], order: 'created_at desc' },
+    columns: ['branch_id', 'patient_id', 'visit_id', 'doctor_id', 'title', 'tooth', 'diagnosis', 'description'], filters: ['patient_id', 'visit_id'], order: 'created_at desc' },
   record_files: { table: 'record_files', scope: 'org', read: 'patients.view', write: 'patients.edit',
     columns: ['record_id', 'kind', 'name'], filters: ['patient_id', 'record_id'], order: 'created_at desc' },
   acts: { table: 'acts', scope: 'branch', read: 'patients.view', write: 'patients.edit',

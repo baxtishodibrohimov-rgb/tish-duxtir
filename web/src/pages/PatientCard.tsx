@@ -1,19 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, CalendarDays, CalendarPlus, FilePen, Bell, Printer, Trash2, Pencil, Upload, FileText, Lock, Wallet, X, AlertTriangle, IdCard, Search, Plus, UserRound } from 'lucide-react';
+import { ArrowLeft, CalendarDays, CalendarPlus, FilePen, Bell, Printer, Trash2, Pencil, Upload, FileText, Lock, Wallet, X, AlertTriangle, IdCard, Plus, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
 import { ageOf, dmy, dmyhm, hm, initials, isoDate, money, phoneShow, som, MONTHS, WD_SHORT } from '@/lib/format';
-import { Link, useQueryParam, useTitle } from '@/lib/router';
+import { Link, navigate, useLocation, useQueryParam, useTitle } from '@/lib/router';
 import { VISIT_STATUS } from '@/lib/visit';
-import type { Act, ActItem, Cashbox, Patient, PriceCategory, PriceItem, RecordFile, Reminder, Room, TreatmentRecord, Visit, Warehouse } from '@/lib/types';
+import type { Act, ActItem, Cashbox, Patient, PriceCategory, PriceItem, RecordFile, Reminder, Room, Visit, Warehouse } from '@/lib/types';
 import { NewPatient } from './NewPatient';
 import { Plans } from '@/components/Plans';
-import { CatIconSvg, WorksWizard } from '@/components/WorksWizard';
+import { HistoryTab } from '@/components/History';
 import { VisitModal } from '@/components/VisitModal';
-import { Badge, Button, Card, Confirm, Empty, ErrorBox, Field, Input, Modal, PageLoader, Select, Textarea, cx } from '@/components/ui';
+import { Badge, Button, Card, Confirm, Empty, ErrorBox, Field, Input, Modal, PageLoader, Select, cx } from '@/components/ui';
 
 export { VISIT_STATUS } from '@/lib/visit';
 
@@ -27,6 +27,14 @@ interface Summary { patient: Patient; billed: number; paid: number; last_visit: 
 
 export function PatientCard({ id }: { id: string }) {
   const [tab0, setTab] = useQueryParam<Tab>('tab', 'visits');
+  // Jadvaldagi qabuldan kelinganda: ?quick=act (tezkor akt) yoki ?pay=1 (to'lov), doctor — qabul shifokori.
+  const { search } = useLocation();
+  const [jump] = useState(() => ({ quick: search.get('quick') === 'act', pay: search.get('pay') === '1', doctor: search.get('doctor') || null }));
+  useEffect(() => {
+    if (!jump.quick && !jump.pay) return;
+    const q = new URLSearchParams(location.search); q.delete('quick'); q.delete('pay'); q.delete('doctor');
+    navigate(`${location.pathname}?${q.toString()}`, true);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const tab: Tab = (tab0 as string) === 'files' ? 'docs' : tab0;
   const { members, memberName } = useOrg();
   const sum = useQuery({ queryKey: ['patients', 'summary', id], queryFn: () => http.get<Summary>(`/api/patients/${id}/summary`) });
@@ -81,10 +89,10 @@ export function PatientCard({ id }: { id: string }) {
       {tab === 'info' && <NewPatient patient={p} onDone={() => setTab('visits')} />}
       {tab === 'tasks' && <TasksTab p={p} />}
       {tab === 'visits' && <VisitsTab p={p} />}
-      {tab === 'plans' && <Plans patient={p} />}
+      {tab === 'plans' && <Plans patient={p} quickAct={jump.quick ? { doctor: jump.doctor } : undefined} />}
       {tab === 'history' && <HistoryTab p={p} />}
       {tab === 'docs' && <FilesTab p={p} />}
-      {tab === 'finance' && <FinanceTab p={p} s={sum.data!} />}
+      {tab === 'finance' && <FinanceTab p={p} s={sum.data!} openPay={jump.pay} payDoctor={jump.doctor} />}
     </main>
   );
 }
@@ -272,103 +280,6 @@ export function ServicePicker({ onPick, onClose, withTooth }: { onPick: (l: { it
   );
 }
 
-// ---------------- Davolash tarixi ----------------
-interface WorkRow { act_id: string; act_date: string; doctor_id: string | null; works: string[]; tooth: string | null; mats: { name: string; unit: string; qty: number }[] }
-function HistoryTab({ p }: { p: Patient }) {
-  const { can, me, branch, members, memberName } = useOrg();
-  const recs = useList<TreatmentRecord>('treatment_records', { patient_id: p.id });
-  const [f, setF] = useState({ tooth: '', diagnosis: '', description: '' });
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState('');
-  const [wiz, setWiz] = useState(false);
-  const add = useAction(() => db.insert('treatment_records', { ...f, patient_id: p.id, doctor_id: me.user_id, branch_id: branch.id }),
-    { invalidate: ['treatment_records'], success: 'Yozuv qo‘shildi', onDone: () => { setF({ tooth: '', diagnosis: '', description: '' }); setOpen(false); } });
-  const del = useAction((id: string) => db.remove('treatment_records', id), { invalidate: ['treatment_records'] });
-  const list = (recs.data ?? []).filter((r) => !q || `${r.diagnosis} ${r.description} ${r.tooth}`.toLowerCase().includes(q.toLowerCase()));
-  const works = useQuery({ queryKey: ['acts', 'works', p.id], queryFn: () => http.get<WorkRow[]>(`/api/patients/${p.id}/works`) });
-  const wl = (works.data ?? []).filter((w) => !q || `${w.works.join(' ')} ${w.tooth ?? ''} ${w.mats.map((m) => m.name).join(' ')}`.toLowerCase().includes(q.toLowerCase()));
-  const byDay = useMemo(() => {
-    const m = new Map<string, { recs: TreatmentRecord[]; works: WorkRow[] }>();
-    const get = (k: string) => { const v = m.get(k) ?? { recs: [], works: [] }; m.set(k, v); return v; };
-    for (const r of list) get(isoDate(new Date(r.created_at))).recs.push(r);
-    for (const w of wl) get(w.act_date).works.push(w);
-    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [list, wl]);
-  const color = (u: string | null) => members.find((m) => m.user_id === u)?.color ?? '#0ea5e9';
-  return (
-    <div className="flex max-w-[1000px] flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative w-80 max-w-full">
-          <Search size={16} className="pointer-events-none absolute top-3 left-3 text-faint" />
-          <label htmlFor="hs" className="sr-only">Qidirish</label>
-          <input id="hs" type="search" placeholder="Qidirish" value={q} onChange={(e) => setQ(e.target.value)} className="h-10 w-full rounded-[10px] border border-line bg-white pr-3 pl-9 text-sm" />
-        </div>
-        {can('patients.edit') && (
-          <span className="flex flex-wrap gap-2">
-            {can('patients.edit', branch.id) && <button type="button" onClick={() => setWiz(true)} className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-primary bg-[#f2fbff] px-4 text-sm font-medium text-primary-hover"><CatIconSvg icon="tooth" size={16} />Material xarajat</button>}
-            <button type="button" onClick={() => setOpen(!open)} className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-primary px-4 text-sm font-medium text-white"><Plus size={16} />Yangi yozuv</button>
-          </span>
-        )}
-      </div>
-      {wiz && <WorksWizard patient={p} branchId={branch.id} onClose={() => setWiz(false)} />}
-      {open && (
-        <section className="flex flex-col gap-2 rounded-2xl border border-line bg-white p-4">
-          <div className="grid grid-cols-[100px_1fr] gap-2">
-            <Input placeholder="Tish №" value={f.tooth} onChange={(e) => setF({ ...f, tooth: e.target.value })} aria-label="Tish raqami" />
-            <Input placeholder="Tashxis (masalan: Pulpit)" value={f.diagnosis} onChange={(e) => setF({ ...f, diagnosis: e.target.value })} aria-label="Tashxis" autoFocus />
-          </div>
-          <Textarea rows={2} placeholder="Nima qilindi, izoh…" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} aria-label="Izoh" />
-          <div className="flex justify-end gap-2"><Button onClick={() => setOpen(false)}>Bekor qilish</Button><Button variant="primary" disabled={!f.diagnosis && !f.description} loading={add.isPending} onClick={() => add.mutate(undefined)}>Saqlash</Button></div>
-        </section>
-      )}
-      {byDay.length === 0 && <Empty>Yozuvlar yo‘q</Empty>}
-      {byDay.map(([day, { recs: rs, works: ws }]) => (
-        <div key={day} className="flex flex-col gap-4">
-          <div className="flex items-center gap-3">
-            <span className="h-px flex-1 bg-line" />
-            <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-sub">📅 {new Date(day).getDate()}-{MONTHS[new Date(day).getMonth()]} {new Date(day).getFullYear()}</span>
-            <span className="h-px flex-1 bg-line" />
-          </div>
-          {ws.map((w) => (
-            <section key={w.act_id} className="rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04)]">
-              <div className="flex gap-3 p-4">
-                <span className="grid h-9 w-9 flex-none place-items-center rounded-full text-xs font-semibold text-white" style={{ background: color(w.doctor_id) }}>{initials(memberName(w.doctor_id))}</span>
-                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-base font-semibold">{w.works.join(', ') || 'Ish'}</span>
-                    {w.tooth && <span className="rounded-full bg-[#e6f6fc] px-2 py-0.5 text-xs font-semibold text-[#075985]">🦷 {w.tooth}</span>}
-                    <span className="rounded-full bg-ok-soft px-2 py-0.5 text-xs font-medium text-[#166534]">Material xarajat</span>
-                  </div>
-                  <span className="text-xs text-sub"><span style={{ color: color(w.doctor_id) }}>{memberName(w.doctor_id)}</span> · {dmy(w.act_date)}</span>
-                  {w.mats.length > 0 && (
-                    <div className="flex flex-col overflow-hidden rounded-[10px] border border-muted">
-                      <span className="bg-surface px-3 py-1.5 text-xs font-semibold text-sub">Material xarajat · ombordan chiqarildi</span>
-                      {w.mats.map((m) => <div key={m.name} className="flex justify-between gap-3 border-t border-muted px-3 py-1.5 text-sm"><span>{m.name}</span><b className="font-semibold tabular-nums">{money(m.qty)} {m.unit}</b></div>)}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </section>
-          ))}
-          {rs.map((r) => (
-            <section key={r.id} className="rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04)]">
-              <div className="flex gap-3 p-4">
-                <span className="grid h-9 w-9 flex-none place-items-center rounded-full text-xs font-semibold text-white" style={{ background: color(r.doctor_id) }}>{initials(memberName(r.doctor_id))}</span>
-                <div className="flex flex-1 flex-col gap-0.5">
-                  <span className="text-base font-semibold">{r.diagnosis || 'Yozuv'}</span>
-                  <span className="text-xs text-sub"><span style={{ color: color(r.doctor_id) }}>{memberName(r.doctor_id)}</span>  {dmyhm(r.created_at)}</span>
-                  <span className="mt-1 text-sm whitespace-pre-wrap">{r.tooth && <span className="mr-1.5 rounded bg-muted px-1.5 py-px text-xs font-medium">№{r.tooth}</span>}{r.description}</span>
-                </div>
-                {can('patients.edit') && <button type="button" aria-label="O‘chirish" onClick={() => del.mutate(r.id)} className="grid h-7 w-7 place-items-center self-start text-faint hover:text-bad"><Trash2 size={16} /></button>}
-              </div>
-            </section>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ---------------- Fayllar ----------------
 function FilesTab({ p }: { p: Patient }) {
   const { can } = useOrg();
@@ -434,7 +345,7 @@ function FilesTab({ p }: { p: Patient }) {
 // ---------------- Moliya: aktlar va to'lovlar ----------------
 interface Move { id: string; kind: string; amount: number; cashbox_id: string; moved_at: string; note: string | null; act_id: string | null; created_by: string | null }
 
-function FinanceTab({ p, s }: { p: Patient; s: Summary }) {
+function FinanceTab({ p, s, openPay, payDoctor }: { p: Patient; s: Summary; openPay?: boolean; payDoctor?: string | null }) {
   const { can, branch, me, memberName, branches } = useOrg();
   const acts = useList<Act>('acts', { patient_id: p.id });
   const actIds = (acts.data ?? []).map((a) => a.id);
@@ -443,7 +354,7 @@ function FinanceTab({ p, s }: { p: Patient; s: Summary }) {
   const boxes = useList<Cashbox>('cashboxes', { archived: false });
   const bmap = byId(branches), cbmap = byId(boxes.data);
   const [addTo, setAddTo] = useState<string | null>(null);
-  const [pay, setPay] = useState<{ act?: string; refund?: boolean } | null>(null);
+  const [pay, setPay] = useState<{ act?: string; refund?: boolean } | null>(openPay ? {} : null);
   const [closing, setClosing] = useState<Act | null>(null);
   const [cancel, setCancel] = useState<Act | null>(null);
 
@@ -526,7 +437,9 @@ function FinanceTab({ p, s }: { p: Patient; s: Summary }) {
       )}
 
       {addTo && <ServicePicker withTooth onClose={() => setAddTo(null)} onPick={(list) => addItems.mutate({ act: addTo, list })} />}
-      {pay && <PaymentModal patient={p} actId={pay.act} refund={pay.refund} defaultAmount={pay.refund ? 0 : Math.max(debt, 0)} onClose={() => setPay(null)} />}
+      {pay && <PaymentModal patient={p} actId={pay.act} refund={pay.refund} defaultAmount={pay.refund ? 0 : Math.max(debt, 0)}
+        doctorId={pay.act ? (acts.data ?? []).find((a) => a.id === pay.act)?.doctor_id ?? null : payDoctor ?? [...(acts.data ?? [])].filter((a) => a.status === 'closed').sort((x, y) => y.act_date.localeCompare(x.act_date))[0]?.doctor_id ?? null}
+        onClose={() => setPay(null)} />}
       {closing && <CloseActModal act={closing} onClose={() => setClosing(null)} />}
       <Confirm open={!!cancel} danger yes={cancel?.status === 'draft' ? 'O‘chirish' : 'Bekor qilish'}
         text={cancel?.status === 'draft' ? 'Ochiq aktni o‘chirasizmi?' : 'Yopilgan akt bekor qilinadi, u bo‘yicha chiqarilgan materiallar omborga qaytariladi. Davom etasizmi?'}
@@ -578,8 +491,10 @@ function CloseActModal({ act, onClose }: { act: Act; onClose: () => void }) {
   );
 }
 
-export function PaymentModal({ patient, actId, refund, defaultAmount, onClose }: { patient: Patient; actId?: string; refund?: boolean; defaultAmount: number; onClose: () => void }) {
-  const { branch } = useOrg();
+export function PaymentModal({ patient, actId, refund, defaultAmount, doctorId, onClose }: { patient: Patient; actId?: string; refund?: boolean; defaultAmount: number; doctorId?: string | null; onClose: () => void }) {
+  const { branch, members } = useOrg();
+  const doctors = members.filter((m) => m.is_active && ['doctor', 'owner'].includes(m.role));
+  const [doc, setDoc] = useState(doctorId ?? '');
   const boxes = useList<Cashbox>('cashboxes', { branch_id: branch.id, archived: false });
   const [box, setBox] = useState('');
   const [amount, setAmount] = useState(defaultAmount ? String(defaultAmount) : '');
@@ -588,7 +503,7 @@ export function PaymentModal({ patient, actId, refund, defaultAmount, onClose }:
     const cb = box || boxes.data?.[0]?.id;
     if (!cb) throw new Error('Kassa yo‘q');
     if (!(Number(amount) > 0)) throw new Error('Summani kiriting');
-    return db.insert('money_moves', { kind: refund ? 'refund' : 'income', cashbox_id: cb, amount: Math.round(Number(amount)), patient_id: patient.id, act_id: actId ?? null, note });
+    return db.insert('money_moves', { kind: refund ? 'refund' : 'income', cashbox_id: cb, amount: Math.round(Number(amount)), patient_id: patient.id, act_id: actId ?? null, doctor_id: doc || null, note });
   }, { invalidate: ['money_moves', 'patients', 'cash'], success: refund ? 'Pul qaytarildi' : 'To‘lov qabul qilindi', onDone: onClose });
   return (
     <Modal open onClose={onClose} title={refund ? 'Pulni qaytarish' : 'To‘lov qabul qilish'} width={440}
@@ -604,6 +519,15 @@ export function PaymentModal({ patient, actId, refund, defaultAmount, onClose }:
           ))}
         </div>
         <Field label="Summa, so‘m">{(id) => <Input id={id} type="number" min={0} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />}</Field>
+        {defaultAmount > 0 && !refund && <span className="-mt-1.5 text-xs text-sub">Bemor qarzi: {som(defaultAmount)} — summa avtomatik qo‘yildi</span>}
+        {!refund && (
+          <Field label="Shifokor (pul kimga yoziladi)">{(id) => (
+            <Select id={id} value={doc} onChange={(e) => setDoc(e.target.value)}>
+              <option value="">— Tanlanmagan</option>
+              {doctors.map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name}</option>)}
+            </Select>
+          )}</Field>
+        )}
         <Field label="Izoh">{(id) => <Input id={id} value={note} onChange={(e) => setNote(e.target.value)} />}</Field>
       </div>
     </Modal>

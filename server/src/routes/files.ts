@@ -22,6 +22,7 @@ export async function fileRoutes(app: FastifyInstance) {
     const f = (k: string) => { const v = (part.fields[k] as any)?.value; return typeof v === 'string' && v ? v : null; };
     const patientId = f('patient_id');
     const recordId = f('record_id');
+    const commentId = f('comment_id');
     const kind = ['image', 'audio', 'xray', 'file'].includes(f('kind') ?? '') ? f('kind')! : part.mimetype.startsWith('image/') ? 'image' : part.mimetype.startsWith('audio/') ? 'audio' : 'file';
     const p = await one<any>(pool, 'select id from patients where id = $1 and org_id = $2', [patientId, m.org_id]);
     if (!p) throw bad('Bemor topilmadi');
@@ -39,9 +40,13 @@ export async function fileRoutes(app: FastifyInstance) {
           const r = await one(c, 'select 1 from treatment_records where id = $1 and patient_id = $2', [recordId, p.id]);
           if (!r) throw bad('Yozuv topilmadi');
         }
-        return one(c, `insert into record_files (org_id, record_id, patient_id, kind, storage_path, name, mime, size_bytes, created_by)
-                       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning *`,
-          [m.org_id, recordId, p.id, kind, rel, part.filename?.slice(0, 200) ?? null, part.mimetype, size, m.user_id]);
+        if (commentId) {
+          const k = await one(c, 'select 1 from record_comments where id = $1 and record_id = $2', [commentId, recordId]);
+          if (!k) throw bad('Izoh topilmadi');
+        }
+        return one(c, `insert into record_files (org_id, record_id, comment_id, patient_id, kind, storage_path, name, mime, size_bytes, created_by)
+                       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning *`,
+          [m.org_id, recordId, commentId, p.id, kind, rel, part.filename?.slice(0, 200) ?? null, part.mimetype, size, m.user_id]);
       });
     } catch (e) { fs.rmSync(abs, { force: true }); throw e; }
   });

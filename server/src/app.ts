@@ -14,6 +14,7 @@ import { fileRoutes } from './routes/files.js';
 import { planRoutes } from './routes/plans.js';
 import { reportRoutes } from './routes/reports.js';
 import { workRoutes } from './routes/works.js';
+import { historyRoutes } from './routes/history.js';
 import { HttpError, pgMessage } from './errors.js';
 import { pool } from './db.js';
 
@@ -71,6 +72,7 @@ export async function buildApp() {
   await planRoutes(app);
   await reportRoutes(app);
   await workRoutes(app);
+  await historyRoutes(app);
 
   return app;
 }

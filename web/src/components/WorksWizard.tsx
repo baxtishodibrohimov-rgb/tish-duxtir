@@ -112,7 +112,7 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
     return visit ? http.post<{ left: { product_id: string; qty: number }[] }>(`/api/visits/${visit.id}/works`, body)
       : http.post<{ left: { product_id: string; qty: number }[] }>(`/api/patients/${patient.id}/works`, { ...body, branch_id: branchId });
   }, {
-    invalidate: ['acts', 'patients', 'visits', 'stock_balances', 'stock_docs', 'stock', 'works', 'patient-works'],
+    invalidate: ['acts', 'patients', 'visits', 'stock_balances', 'stock_docs', 'stock', 'works', 'patient-works', 'patient-history'],
     onDone: (r) => setDone({
       work: work?.name ?? '', tooth,
       mats: chosen.map(([pid, q]) => ({ name: pm.get(pid)?.name ?? '', q, unit: pm.get(pid)?.unit ?? '', left: r.left.find((x) => x.product_id === pid)?.qty ?? 0 })),

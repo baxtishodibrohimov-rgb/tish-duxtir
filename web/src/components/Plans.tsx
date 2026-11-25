@@ -53,10 +53,13 @@ const GREEN = 'h-[42px] rounded-[3px] bg-[#15803d] px-4 text-[15px] text-white h
 
 // ---------------- Asosiy komponent ----------------
 /** Bemor kartasidagi "Davolash rejalari" bo'limi (maketdagi Plans.dc). */
-export function Plans({ patient }: { patient: Patient }) {
+/** quickAct — jadvaldagi qabuldan "Tezkor akt": shu qabul shifokori nomidan yangi tezkor akt darhol ochiladi. */
+export function Plans({ patient, quickAct }: { patient: Patient; quickAct?: { doctor: string | null } }) {
   const { can } = useOrg();
   const plans = useList<Plan>('treatment_plans', { patient_id: patient.id });
-  const [mode, setMode] = useState<{ v: 'list' } | { v: 'view'; id: string } | { v: 'edit'; draft: Plan; isNew: boolean }>({ v: 'list' });
+  const [mode, setMode] = useState<{ v: 'list' } | { v: 'view'; id: string } | { v: 'edit'; draft: Plan; isNew: boolean }>(() => quickAct
+    ? { v: 'edit', isNew: true, draft: blank(patient, 'act', quickAct.doctor, 'Tezkor akt', [{ id: uid(), name: 'Bajarilgan ishlar', doctor_id: quickAct.doctor, formula: 'tooth', rows: [] }]) }
+    : { v: 'list' });
   const edit = can('patients.edit');
   const cur = mode.v === 'view' ? plans.data?.find((p) => p.id === mode.id) : undefined;
 
@@ -337,7 +340,7 @@ function RowAction({ kind, plan, rows, defDoc, onClose, onDone }: { kind: 'done'
   const go = useAction(() => kind === 'done'
     ? http.post(`/api/plans/${plan.id}/done`, { rows: rows.map((r) => r.id), branch_id: branch.id, doctor_id: f.doc, assistant_id: f.asst || null, date: f.date, warehouse_id: f.wh || null, note: f.note })
     : http.post(`/api/plans/${plan.id}/mark`, { rows: rows.map((r) => r.id), status: kind === 'plan' ? 'planned' : 'none', date: f.date, note: f.note }),
-  { invalidate: ['treatment_plans', 'acts', 'patients', 'stock_balances'], success: kind === 'done' ? 'Bajarildi: akt yaratildi va yopildi' : 'Saqlandi', onDone });
+  { invalidate: ['treatment_plans', 'acts', 'patients', 'stock_balances', 'patient-history'], success: kind === 'done' ? 'Bajarildi: akt yaratildi va yopildi' : 'Saqlandi', onDone });
   const L = 'flex flex-col gap-1 text-[15px]';
   const IN = 'h-[42px] rounded border border-line bg-white px-3';
   return (

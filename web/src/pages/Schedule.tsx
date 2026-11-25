@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent } from 'react';
-import { ChevronLeft, ChevronRight, Settings as Gear, Stethoscope, Users, UserCog, Printer, SlidersHorizontal, CalendarDays, AlertTriangle, Plus, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Settings as Gear, Stethoscope, Users, UserCog, Printer, SlidersHorizontal, CalendarDays, AlertTriangle, Plus, Trash2, Copy, IdCard, Pencil, ClipboardList, History, Wallet } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { useAction, useList, byId } from '@/lib/hooks';
-import { db, http } from '@/lib/api';
+import { db } from '@/lib/api';
 import { addDays, ageOf, dmy, hm, initials, isoDate, money, pad, phoneShow, sameDay } from '@/lib/format';
 import { Link, navigate, useLocation, useTitle } from '@/lib/router';
 import { DEAD_STATUS, MOOD_GRID, VISIT_STATUS, WD_LOWER } from '@/lib/visit';
 import { CatIconSvg, WorksWizard } from '@/components/WorksWizard';
-import type { Act, Cashbox, Member, Patient, PriceItem, Room, Visit, VisitStatus, WaitItem } from '@/lib/types';
+import type { Act, Member, Patient, Room, Visit, VisitStatus, WaitItem } from '@/lib/types';
 import { MiniCalendar } from '@/components/MiniCalendar';
 import { VisitModal, balanceInfo, usePatientBalances, useClickAway, type VisitInit } from '@/components/VisitModal';
 import { Button, Toggle, cx } from '@/components/ui';
@@ -362,29 +362,12 @@ export function Schedule() {
 function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy, onWorks }: {
   v: Visit; p: Patient; bal: ReturnType<typeof balanceInfo>; top: number; right: boolean; onClose: () => void; onEdit: () => void; onCopy: () => void; onWorks: () => void;
 }) {
-  const { branch, members, memberName, can, me } = useOrg();
-  const [mode, setMode] = useState<'info' | 'pay' | 'act'>('info');
-  const [amt, setAmt] = useState(bal.n < 0 ? String(-bal.n) : '');
-  const [box, setBox] = useState('');
-  const [item, setItem] = useState('');
+  const { branch, members, memberName, can } = useOrg();
   const [msg, setMsg] = useState('');
-  const boxes = useList<Cashbox>('cashboxes', { branch_id: branch.id, archived: false }, { enabled: mode === 'pay' });
-  const price = useList<PriceItem>('price_items', { archived: false }, { enabled: mode === 'act' });
   const color = members.find((m) => m.user_id === v.doctor_id)?.color ?? '#0ea5e9';
   const upd = useAction((patch: Partial<Visit>) => db.update('visits', v.id, patch), { invalidate: ['visits'] });
-  const pay = useAction(() => {
-    const n = Math.round(Number(amt) || 0);
-    if (n <= 0) throw new Error('Summani kiriting');
-    return db.insert('money_moves', { kind: 'income', cashbox_id: box || boxes.data?.[0]?.id, amount: n, patient_id: p.id, doctor_id: v.doctor_id });
-  }, { invalidate: ['patients', 'money_moves', 'cash'], onDone: () => { setMsg(`${money(Number(amt))} so‘m to‘lov qabul qilindi`); setMode('info'); } });
-  const act = useAction(async () => {
-    const it = price.data?.find((x) => x.id === (item || price.data?.[0]?.id));
-    if (!it) throw new Error('Xizmatni tanlang');
-    const a = await db.insert<Act>('acts', { branch_id: branch.id, patient_id: p.id, visit_id: v.id, doctor_id: v.doctor_id ?? (me.role === 'doctor' ? me.user_id : null) });
-    await db.insert('act_items', { act_id: a.id, price_item_id: it.id, name: it.name, price: it.price, qty: 1 });
-    await http.post(`/api/acts/${a.id}/close`);
-    return it;
-  }, { invalidate: ['acts', 'patients', 'stock_balances'], onDone: (it) => { setMsg(`Akt yopildi: ${it.name}`); setMode('info'); } });
+  // Tezkor akt va to'lov bemor kartasida ochiladi; shifokor — shu qabulni ko'rgan shifokor.
+  const doc = v.doctor_id ? `&doctor=${v.doctor_id}` : '';
   const [moodOpen, setMoodOpen] = useState(false);
   const acts = useList<Act>('acts', { patient_id: p.id, status: 'closed' });
   const age = ageOf(p.birth_date);
@@ -437,41 +420,24 @@ function VisitPopover({ v, p, bal, top, right, onClose, onEdit, onCopy, onWorks 
         {p.important_info && <span className="font-medium text-[#dc2626]">⚠ {p.important_info}</span>}
         {v.comment && <span className="text-sub">{v.comment}</span>}
       </div>
-      {mode === 'info' && (
-        <div className="flex items-center gap-1.5">
-          {can('patients.edit', branch.id) && <button type="button" onClick={() => setMode('act')} className={cx(BTN, 'bg-primary')}>Tezkor akt</button>}
-          {can('cashbox.edit', branch.id) && <button type="button" onClick={() => setMode('pay')} className={cx(BTN, 'bg-ok')}>To‘lov qabul qilish</button>}
-          <span className="flex-1" />
-          <button type="button" onClick={() => { onCopy(); setMsg('Nusxalandi — bo‘sh joyda o‘ng tugma → «Qo‘yish»'); }} aria-label="Nusxalash" title="Qabulni nusxalash (o‘ng tugma → Qo‘yish)" className="h-[30px] w-[30px] rounded-md text-sub hover:bg-muted">⧉</button>
-          <Link to={`/patients/${p.id}`} aria-label="Bemor kartasi" title="Bemor kartasi" className="grid h-[30px] w-[30px] place-items-center rounded-md no-underline hover:bg-muted">🪪</Link>
-          <button type="button" onClick={onEdit} aria-label="Qabulni tahrirlash" title="Qabulni tahrirlash" className="h-[30px] w-[30px] rounded-md text-sub hover:bg-muted">✎</button>
-        </div>
-      )}
-      {mode === 'pay' && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-[#f0fdf4] p-2">
-          <input type="number" min={0} aria-label="Summa" placeholder="Summa" value={amt} onChange={(e) => setAmt(e.target.value)} className="h-[30px] w-[110px] rounded border border-line px-2 text-[13px]" />
-          <select aria-label="Kassa" value={box} onChange={(e) => setBox(e.target.value)} className="h-[30px] rounded border border-line bg-white px-1.5 text-[13px]">
-            {(boxes.data ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          <button type="button" disabled={pay.isPending} onClick={() => pay.mutate(undefined)} className={cx(BTN, 'bg-ok')}>Qabul qilish</button>
-          <button type="button" onClick={() => setMode('info')} className="h-[30px] px-2 text-[13px] text-sub">Bekor</button>
-        </div>
-      )}
-      {mode === 'act' && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-primary-soft/50 p-2">
-          <select aria-label="Xizmat" value={item} onChange={(e) => setItem(e.target.value)} className="h-[30px] min-w-0 flex-1 rounded border border-line bg-white px-1.5 text-[13px]">
-            {(price.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.name} — {money(x.price)}</option>)}
-          </select>
-          <button type="button" disabled={act.isPending} onClick={() => act.mutate(undefined)} className={cx(BTN, 'bg-primary')}>Aktni yopish</button>
-          <button type="button" onClick={() => setMode('info')} className="h-[30px] px-2 text-[13px] text-sub">Bekor</button>
-        </div>
-      )}
-      {msg && <span role="status" className="font-medium text-ok">✓ {msg}</span>}
-      <div className="flex gap-3 border-t border-muted pt-2 text-[13px]">
-        {([['visits', 'Vizitlar'], ['plans', 'Rejalar'], ['history', 'Tarix'], ['finance', 'Moliya']] as const).map(([k, l]) => (
-          <Link key={k} to={`/patients/${p.id}?tab=${k}`}>{l}</Link>
-        ))}
+      <div className="flex items-center gap-1.5">
+        {can('patients.edit', branch.id) && <button type="button" onClick={() => navigate(`/patients/${p.id}?tab=plans&quick=act${doc}`)} className={cx(BTN, 'bg-primary')}>Tezkor akt</button>}
+        {can('cashbox.edit', branch.id) && <button type="button" onClick={() => navigate(`/patients/${p.id}?tab=finance&pay=1${doc}`)} className={cx(BTN, 'bg-ok')}>To‘lov qabul qilish</button>}
+        <span className="flex-1" />
+        <button type="button" onClick={() => { onCopy(); setMsg('Nusxalandi — bo‘sh joyda o‘ng tugma → «Qo‘yish»'); }} aria-label="Nusxalash" title="Qabulni nusxalash (o‘ng tugma → Qo‘yish)" className="grid h-[30px] w-[30px] place-items-center rounded-md text-sub hover:bg-muted"><Copy size={16} /></button>
+        <Link to={`/patients/${p.id}`} aria-label="Bemor kartasi" title="Bemor kartasi" className="grid h-[30px] w-[30px] place-items-center rounded-md !text-sub no-underline hover:bg-muted"><IdCard size={17} /></Link>
+        <button type="button" onClick={onEdit} aria-label="Qabulni tahrirlash" title="Qabulni tahrirlash" className="grid h-[30px] w-[30px] place-items-center rounded-md text-sub hover:bg-muted"><Pencil size={15} /></button>
       </div>
+      {msg && <span role="status" className="font-medium text-ok">✓ {msg}</span>}
+      <nav aria-label="Bemor kartasi bo‘limlari" className="-mx-1 grid grid-cols-4 gap-1 border-t border-muted pt-2">
+        {([['visits', 'Vizitlar', CalendarDays], ['plans', 'Rejalar', ClipboardList], ['history', 'Tarix', History], ['finance', 'Moliya', Wallet]] as const).map(([k, l, Ic]) => (
+          <Link key={k} to={`/patients/${p.id}?tab=${k}`}
+            className="flex flex-col items-center gap-0.5 rounded-md py-1.5 text-[12px] !text-[#3d4858] no-underline hover:bg-muted">
+            <Ic size={17} className={k === 'finance' && bal.n < 0 ? 'text-bad' : 'text-primary-hover'} />
+            <span>{l}{k === 'finance' && bal.n < 0 && <b className="ml-1 font-semibold text-bad">{money(-bal.n)}</b>}</span>
+          </Link>
+        ))}
+      </nav>
     </div>
   );
 }
