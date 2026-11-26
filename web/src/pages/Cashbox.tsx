@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Plus, Banknote, CreditCard, Smartphone, Landmark, Pencil, Trash2, Settings as Gear, WalletCards, ListChecks, Users, TrendingDown, X, UserRound, Download, Wallet, ChevronDown, ChevronRight, ChevronLeft, CalendarDays, Stethoscope } from 'lucide-react';
-import { downloadCsv } from './warehouse/Docs';
+import { downloadXlsx, fileSafe, type XCell, type XSheet } from '@/lib/xlsx';
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
@@ -17,6 +17,17 @@ const SUBS: { key: Sub; label: string; icon: typeof Banknote }[] = [
   { key: 'boxes', label: 'Kassalar', icon: WalletCards }, { key: 'ops', label: 'Operatsiyalar', icon: ListChecks },
   { key: 'parties', label: 'Kontragentlar', icon: Users }, { key: 'expenses', label: 'Xarajatlar', icon: TrendingDown },
 ];
+
+/** "⬇ Excel" tugmasi — bosilganda .xlsx yuklab olinadi. */
+function XlsBtn({ onClick, label = 'Excel', title = 'Excel faylga yuklab olish' }: { onClick: () => void; label?: string; title?: string }) {
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); onClick(); }} title={title} aria-label={title}
+      className="inline-flex h-8 flex-none items-center gap-1.5 rounded-lg border border-[#16a34a]/40 bg-white px-2.5 text-[13px] font-medium text-[#15803d] hover:bg-[#f0fdf4]">
+      <Download size={14} /> {label}
+    </button>
+  );
+}
+const periodText = (from: string, to: string) => (from === to ? dmy(from) : `${dmy(from)} – ${dmy(to)}`);
 
 export const KIND: Record<MoneyMove['kind'], { label: string; tone: string }> = {
   income: { label: 'Kirim', tone: 'bg-ok-soft text-ok' },
@@ -181,6 +192,48 @@ function Boxes({ period }: { period: Period }) {
   const allIn = incomeRows.reduce((a, m) => a + m.amount, 0);
   const TH_ = 'px-3 py-2 font-medium';
   const NUM = 'px-3 py-2 text-right whitespace-nowrap tabular-nums';
+  const per = periodText(from, to);
+  const tm = (at: string) => dmyhm(at);
+  const fname = (what: string) => `${fileSafe(what)}_${fileSafe(branch.name)}_${from === to ? from : `${from}_${to}`}.xlsx`;
+  // Kartalar tafsiloti → Excel
+  function exportCard(k: CardKey) {
+    if (!x) return;
+    const head: XCell[][] = [[`${titles[k]} · ${branch.name} · ${per}`], []];
+    let rows: XCell[][] = [];
+    if (k === 'ish') rows = [['Bemor', 'Shifokor', 'Qilingan ish', 'To‘langan', 'Qarz'],
+      ...x.work.map((w) => [w.who, w.doc ?? '', Number(w.work), Number(w.paid), Math.max(0, w.work - w.paid)]),
+      ['Jami', '', Number(d.work_done), x.work.reduce((a, w) => a + Number(w.paid), 0), x.work.reduce((a, w) => a + Math.max(0, w.work - w.paid), 0)]];
+    if (k === 'pul') rows = [['Vaqt', 'Bemor', 'Shifokor', 'To‘lov usuli', 'Kim kiritdi', 'Summa'],
+      ...x.income.map((m) => [tm(m.at), m.who ?? '', m.doc ?? '', m.box, m.by_name ?? '', m.kind === 'refund' ? -Number(m.amount) : Number(m.amount)]),
+      ['Jami', '', '', '', '', Number(d.income)]];
+    if (k === 'xar') rows = [['Vaqt', 'Nima uchun / kimga', 'To‘lov usuli', 'Kim kiritdi', 'Summa'],
+      ...x.expense.map((m) => [tm(m.at), m.who ?? '', m.box, m.by_name ?? '', Number(m.amount)]), ['Jami', '', '', '', Number(d.expense)]];
+    if (k === 'foyda') rows = [['Ko‘rsatkich', 'Summa'], ['Kassaga tushgan pul', Number(d.income)], ['Xarajat', -Number(d.expense)], ['Foyda', Number(d.profit)]];
+    downloadXlsx(fname(titles[k].split(' — ')[0]!), [{ name: titles[k].split(' — ')[0]!, rows: [...head, ...rows], bold: [0, 2, head.length + rows.length - 1] }]);
+  }
+  // Shifokor varag'i: to'lovlar (asosiy hisob) va qo'shimcha "Bajarilgan ish"
+  const doctorSheet = (g: (typeof docs)[number]): XSheet => {
+    const pays: XCell[][] = g.rows.map((m) => [tm(m.at), m.who ?? '', m.box, Number(m.amount), Math.round((m.amount * pct) / 100)]);
+    const work = (x?.work ?? []).filter((w) => (w.doc ?? 'Shifokor ko‘rsatilmagan') === g.name);
+    const rows: XCell[][] = [[`Shifokor: ${g.name}`], [`${branch.name} · ${per} · ulush ${pct}%`], [],
+      ['Vaqt', 'Bemor', 'To‘lov usuli', 'To‘langan', `Shifokorga ${pct}%`], ...pays,
+      ['Jami', `${g.patients} ta bemor`, '', g.sum, Math.round((g.sum * pct) / 100)]];
+    const bold = [0, 3, rows.length - 1];
+    if (work.length) {
+      rows.push([], ['Bajarilgan ish (aktlar, ma’lumot uchun)'], ['Bemor', 'Qilingan ish', 'To‘langan', 'Qarz']);
+      bold.push(rows.length - 2, rows.length - 1);
+      for (const w of work) rows.push([w.who, Number(w.work), Number(w.paid), Math.max(0, w.work - w.paid)]);
+      rows.push(['Jami', work.reduce((a, w) => a + Number(w.work), 0), work.reduce((a, w) => a + Number(w.paid), 0), work.reduce((a, w) => a + Math.max(0, w.work - w.paid), 0)]);
+      bold.push(rows.length - 1);
+    }
+    return { name: g.name, rows, bold, widths: [18, 28, 16, 16, 16] };
+  };
+  function exportDoctors() {
+    const sum: XCell[][] = [[`Shifokorlar qancha topdi · ${branch.name} · ${per}`], [], ['Shifokor', 'Bemorlar', 'Tushum (to‘lov)', 'Ulush %', 'Shifokorga'],
+      ...docs.map((g) => [g.name, g.patients, g.sum, pct, Math.round((g.sum * pct) / 100)]),
+      ['Jami', docs.reduce((a, g) => a + g.patients, 0), allIn, '', docs.reduce((a, g) => a + Math.round((g.sum * pct) / 100), 0)]];
+    downloadXlsx(fname('Shifokorlar'), [{ name: 'Umumiy', rows: sum, bold: [0, 2, sum.length - 1], widths: [28, 12, 18, 10, 16] }, ...docs.map(doctorSheet)]);
+  }
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-3">
@@ -197,6 +250,7 @@ function Boxes({ period }: { period: Period }) {
         <section className="overflow-hidden rounded-2xl border border-[#b6e3f4] bg-white shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]">
           <div className="flex items-center gap-2 border-b border-line bg-[#f3fafd] px-4 py-3">
             <h3 className="m-0 flex-1 text-[15px] font-semibold">{titles[open]}</h3>
+            {x && <XlsBtn onClick={() => exportCard(open)} />}
             <button type="button" onClick={() => setOpen(null)} aria-label="Yopish" className="grid h-7 w-7 place-items-center rounded-md text-sub"><X size={16} /></button>
           </div>
           <div className="overflow-x-auto">
@@ -266,6 +320,7 @@ function Boxes({ period }: { period: Period }) {
           <Stethoscope size={18} className="text-primary" />
           <h3 className="m-0 flex-1 text-base font-semibold">{lbl} — shifokorlar qancha topdi</h3>
           <span className="text-[13px] text-sub">Jami: <b className="text-fg">{som(allIn)}</b></span>
+          {docs.length > 0 && <XlsBtn onClick={exportDoctors} title="Barcha shifokorlar hisoboti (har biri alohida varaqda)" />}
         </div>
         {docs.length === 0 && <div className="p-6 text-center text-sm text-sub">Bu davrda to‘lov yo‘q</div>}
         {docs.map((g, i) => {
@@ -283,6 +338,7 @@ function Boxes({ period }: { period: Period }) {
               </button>
               {on && (
                 <div className="overflow-x-auto px-4 pb-3.5 pl-11">
+                  <div className="mb-2 flex justify-end"><XlsBtn label={`${g.name} — Excel`} title="Shu shifokorning hisoboti" onClick={() => downloadXlsx(fname(g.name), [doctorSheet(g)])} /></div>
                   <table className="w-full overflow-hidden rounded-[10px] border border-line bg-white text-sm">
                     <thead className="bg-muted/70"><tr className="text-left text-xs text-sub uppercase"><th className={TH_}>Vaqt</th><th className={TH_}>Bemor</th><th className={TH_}>To‘lov</th><th className={cx(TH_, 'text-right')}>Topgani</th><th className={cx(TH_, 'text-right')}>Shifokorga {pct}%</th></tr></thead>
                     <tbody>{g.rows.map((m) => (
@@ -325,6 +381,12 @@ function BoxDetail({ box, from, to, lbl, oneDay, onClose }: { box: Summary['cash
     <section className="overflow-hidden rounded-2xl border border-primary bg-white">
       <div className="flex items-center gap-2 border-b border-line px-4 py-3">
         <h3 className="m-0 flex-1 text-base font-semibold">{box.name} — {lbl}</h3>
+        {rows.length > 0 && <XlsBtn onClick={() => downloadXlsx(`${fileSafe(box.name)}_${from === to ? from : `${from}_${to}`}.xlsx`, [{
+          name: box.name, bold: [0, 2, rows.length + 3],
+          rows: [[`${box.name} · ${periodText(from, to)}`], [], ['Vaqt', 'Turi', 'Kimdan / kimga', 'Izoh', 'Kiritdi', 'Summa'],
+            ...rows.map((m) => [dmyhm(m.moved_at), KIND[m.kind] ?? m.kind, who(m), m.note ?? '', memberName(m.created_by), sign(m) * m.amount]),
+            ['Davr bo‘yicha jami', '', '', '', '', total]],
+        }])} />}
         <button type="button" onClick={onClose} aria-label="Yopish" className="grid h-8 w-8 place-items-center rounded-md text-sub hover:bg-muted"><X size={16} /></button>
       </div>
       <div className="overflow-x-auto">
@@ -410,6 +472,15 @@ function Operations({ period }: { period: Period }) {
           </select></label>
         <Button size="sm" variant="ghost" className="h-8" onClick={() => { setKind(''); setPat(''); setBy(''); setDoc(''); }}>Tozalash</Button>
         <span className="ml-auto text-sm text-sub">{rows.length} ta operatsiya · jami <b className="text-fg">{som(sum)}</b></span>
+        {rows.length > 0 && <XlsBtn onClick={() => downloadXlsx(`Operatsiyalar_${fileSafe(branch.name)}_${period.from}_${period.to}.xlsx`, [{
+          name: 'Operatsiyalar', bold: [0, 2, rows.length + 3],
+          rows: [[`Operatsiyalar · ${branch.name} · ${periodText(period.from, period.to)}`], [], ['Vaqt', 'Turi', 'Bemor / kontragent / kategoriya', 'Izoh', 'Shifokor', 'To‘lov usuli', 'Kim kiritdi', 'Summa'],
+            ...rows.map((m) => [dmyhm(m.moved_at), KIND[m.kind].label,
+              m.patient_id ? pm.get(m.patient_id)?.full_name ?? '' : m.counterparty_id ? cm.get(m.counterparty_id)?.name ?? '' : m.category_id ? catm.get(m.category_id)?.name ?? '' : '',
+              m.note ?? '', m.doctor_id ? memberName(m.doctor_id) : '', `${bm.get(m.cashbox_id)?.name ?? ''}${m.to_cashbox_id ? ` → ${bm.get(m.to_cashbox_id)?.name ?? ''}` : ''}`,
+              memberName(m.created_by), m.kind === 'income' ? m.amount : m.kind === 'transfer' ? m.amount : -m.amount]),
+            ['Jami (o‘tkazmalarsiz)', '', '', '', '', '', '', sum]],
+        }])} />}
       </div>
       <Card className="overflow-x-auto">
         <table className="w-full border-collapse">
@@ -594,8 +665,7 @@ function Parties() {
       </Card>
       <div className="flex items-center gap-3 text-sm text-sub">
         <span>Jami: <b className="text-fg">{rows.length}</b></span>
-        <button type="button" onClick={() => downloadCsv('Kontragentlar.csv', [COLS.map((c) => c[1]), ...rows.map(({ c, done, paid, bal }) => [c.name, CP_TYPE[c.type], c.phone ?? '', c.email ?? '', c.website ?? '', c.note ?? '', bal, done, paid])])}
-          aria-label="Excel (CSV) ga yuklab olish" title="Excel (CSV) ga yuklab olish" className="grid h-8 w-8 place-items-center rounded-lg hover:bg-muted"><Download size={16} /></button>
+        <XlsBtn onClick={() => downloadXlsx('Kontragentlar.xlsx', [{ name: 'Kontragentlar', rows: [COLS.map((c) => c[1]), ...rows.map(({ c, done, paid, bal }) => [c.name, CP_TYPE[c.type], c.phone ?? '', c.email ?? '', c.website ?? '', c.note ?? '', bal, done, paid])] }])} />
       </div>
       {open && <CounterpartyForm cp={open === 'new' ? undefined : open} onClose={() => setOpen(null)} />}
     </div>
@@ -628,6 +698,12 @@ function PartyProfile({ cp, invoices, payments, purchased, onBack, onEdit, editO
         {can('cashbox.edit') && <button type="button" onClick={onEdit} aria-label="Kontragent ma‘lumotlari" title="Kontragent ma‘lumotlari" className="grid h-8 w-8 place-items-center rounded text-sub hover:bg-muted"><Pencil size={16} /></button>}
         <span className="flex-1" />
         <span className={cx('text-base font-semibold', payTot - invTot < 0 ? 'text-bad' : 'text-ok')}>Balans: {money(payTot - invTot)} so‘m</span>
+        <XlsBtn onClick={() => downloadXlsx(`${fileSafe(cp.name)}.xlsx`, [
+          { name: 'Hisoblar', rows: [[`${cp.name} — hisoblar`], [], ['Sana', 'Nima uchun', 'Summa'], ...invoices.map((i) => [dmy(i.inv_date), i.description ?? '', i.amount]),
+            ...(purchased ? [['', 'Ombor kirimlari', purchased] as XCell[]] : []), ['Jami', '', invTot]], bold: [0, 2, invoices.length + (purchased ? 4 : 3)] },
+          { name: 'To‘lovlar', rows: [[`${cp.name} — to‘lovlar`], [], ['Sana', 'Kassa', 'Izoh', 'Summa'], ...payments.map((m) => [dmy(m.moved_at), bm.get(m.cashbox_id)?.name ?? '', m.note ?? '', m.amount]), ['Jami', '', '', payTot]], bold: [0, 2, payments.length + 3] },
+          { name: 'Balans', rows: [['Ko‘rsatkich', 'Summa'], ['Hisoblar jami', invTot], ['To‘langan', payTot], ['Balans', payTot - invTot]], bold: [0, 3] },
+        ])} />
         <button type="button" onClick={onBack} aria-label="Kontragentlar ro‘yxatiga qaytish" title="Ro‘yxatga qaytish" className="grid h-9 w-9 place-items-center rounded border border-line text-sub"><X size={16} /></button>
       </div>
       {edit && (
@@ -696,6 +772,12 @@ function Expenses({ onAdd }: { onAdd: () => void }) {
       <div className="flex flex-wrap items-center gap-2">
         {can('cashbox.edit', branch.id) && <button type="button" onClick={onAdd} className="inline-flex h-9 items-center gap-1.5 rounded-[3px] bg-primary px-3.5 text-sm text-white"><Plus size={15} />Xarajat qo‘shish</button>}
         <span className="ml-auto text-sm text-sub">{rows.length} ta xarajat · jami <b className="text-fg">{som(total)}</b></span>
+        {rows.length > 0 && <XlsBtn onClick={() => downloadXlsx(`Xarajatlar_${fileSafe(branch.name)}${f.from ? `_${f.from}` : ''}${f.to ? `_${f.to}` : ''}.xlsx`, [{
+          name: 'Xarajatlar', bold: [0, 2, rows.length + 3],
+          rows: [[`Xarajatlar · ${branch.name}${f.from || f.to ? ` · ${f.from ? dmy(f.from) : '…'} – ${f.to ? dmy(f.to) : '…'}` : ''}`], [], ['Sana', 'Summa', 'Kassa', 'Kontragent', 'Kategoriya', 'Izoh', 'Kim yaratdi'],
+            ...rows.map((m) => [dmyhm(m.moved_at), m.amount, bm.get(m.cashbox_id)?.name ?? '', m.counterparty_id ? cm.get(m.counterparty_id)?.name ?? '' : '', m.category_id ? catm.get(m.category_id)?.name ?? '' : '', m.note ?? '', memberName(m.created_by)]),
+            ['Jami', total]],
+        }])} />}
       </div>
       <Card className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
