@@ -211,22 +211,13 @@ function Boxes({ period }: { period: Period }) {
     if (k === 'foyda') rows = [['Ko‘rsatkich', 'Summa'], ['Kassaga tushgan pul', Number(d.income)], ['Xarajat', -Number(d.expense)], ['Foyda', Number(d.profit)]];
     downloadXlsx(fname(titles[k].split(' — ')[0]!), [{ name: titles[k].split(' — ')[0]!, rows: [...head, ...rows], bold: [0, 2, head.length + rows.length - 1] }]);
   }
-  // Shifokor varag'i: to'lovlar (asosiy hisob) va qo'shimcha "Bajarilgan ish"
+  // Shifokor varag'i: faqat to'lovlar va shifokor ulushi.
   const doctorSheet = (g: (typeof docs)[number]): XSheet => {
     const pays: XCell[][] = g.rows.map((m) => [tm(m.at), m.who ?? '', m.box, Number(m.amount), Math.round((m.amount * pct) / 100)]);
-    const work = (x?.work ?? []).filter((w) => (w.doc ?? 'Shifokor ko‘rsatilmagan') === g.name);
     const rows: XCell[][] = [[`Shifokor: ${g.name}`], [`${branch.name} · ${per} · ulush ${pct}%`], [],
       ['Vaqt', 'Bemor', 'To‘lov usuli', 'To‘langan', `Shifokorga ${pct}%`], ...pays,
       ['Jami', `${g.patients} ta bemor`, '', g.sum, Math.round((g.sum * pct) / 100)]];
-    const bold = [0, 3, rows.length - 1];
-    if (work.length) {
-      rows.push([], ['Bajarilgan ish (aktlar, ma’lumot uchun)'], ['Bemor', 'Qilingan ish', 'To‘langan', 'Qarz']);
-      bold.push(rows.length - 2, rows.length - 1);
-      for (const w of work) rows.push([w.who, Number(w.work), Number(w.paid), Math.max(0, w.work - w.paid)]);
-      rows.push(['Jami', work.reduce((a, w) => a + Number(w.work), 0), work.reduce((a, w) => a + Number(w.paid), 0), work.reduce((a, w) => a + Math.max(0, w.work - w.paid), 0)]);
-      bold.push(rows.length - 1);
-    }
-    return { name: g.name, rows, bold, widths: [18, 28, 16, 16, 16] };
+    return { name: g.name, rows, bold: [0, 3, rows.length - 1], widths: [18, 28, 16, 16, 16] };
   };
   function exportDoctors() {
     const sum: XCell[][] = [[`Shifokorlar qancha topdi · ${branch.name} · ${per}`], [], ['Shifokor', 'Bemorlar', 'Tushum (to‘lov)', 'Ulush %', 'Shifokorga'],
