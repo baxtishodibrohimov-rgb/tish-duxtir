@@ -4,7 +4,7 @@ import { CheckCircle2, X, Check, ChevronLeft, ChevronRight, Minus, Plus } from '
 import { useOrg } from '@/lib/auth';
 import { http } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
-import { dmy, qty as fq } from '@/lib/format';
+import { dmy, money, qty as fq } from '@/lib/format';
 import { Link } from '@/lib/router';
 import type { CatIcon, Patient, Visit } from '@/lib/types';
 import { ProductThumb } from './ProductThumb';
@@ -90,6 +90,13 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
   const grp = groups[gi];
   const chosen = Object.entries(used).filter(([, q]) => q > 0);
   const tooth = cat?.ask_teeth ? teethText(teeth) : '';
+  // Narx har doim tishlar soniga ko'payadi (tish so'ralmagan kategoriyada — 1).
+  const nTeeth = cat?.ask_teeth ? Math.max(1, teeth.size) : 1;
+  const [disc, setDisc] = useState<{ open: boolean; mode: 'sum' | 'pct'; val: string }>({ open: false, mode: 'sum', val: '' });
+  const gross = work ? Number(work.price) * nTeeth : 0;
+  const dv = Math.max(0, Number(disc.val) || 0);
+  const discount = Math.min(gross, Math.round(disc.mode === 'pct' ? (gross * Math.min(dv, 100)) / 100 : dv));
+  const net = gross - discount;
 
   const setU = (pid: string, q: number) => { const u = { ...used }; if (q > 0) u[pid] = +q.toFixed(3); else delete u[pid]; setUsed(u); };
   const pickCat = (id: string) => { const x = c!.cats.find((k) => k.id === id)!; setCatId(id); setWorkId(null); setUsed({}); setStep(x.ask_teeth ? 'teeth' : 'works'); };
@@ -110,7 +117,7 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
   const accept = useAction(() => {
     const grpOf = new Map<string, string>();
     for (const g of groups) for (const x of g.cards) grpOf.set(x.product_id, g.name);
-    const body = { items: [workId], tooth: tooth || null, materials: chosen.map(([product_id, qty]) => ({ product_id, qty, group: grpOf.get(product_id) ?? null })), warehouse_id: c?.warehouse_id ?? null };
+    const body = { items: [workId], tooth: tooth || null, qty: nTeeth, discount, discount_pct: disc.mode === 'pct' && dv ? Math.min(dv, 100) : null, materials: chosen.map(([product_id, qty]) => ({ product_id, qty, group: grpOf.get(product_id) ?? null })), warehouse_id: c?.warehouse_id ?? null };
     return visit ? http.post<{ left: { product_id: string; qty: number }[] }>(`/api/visits/${visit.id}/works`, body)
       : http.post<{ left: { product_id: string; qty: number }[] }>(`/api/patients/${patient.id}/works`, { ...body, branch_id: branchId });
   }, {
@@ -120,8 +127,29 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
       mats: chosen.map(([pid, q]) => ({ name: pm.get(pid)?.name ?? '', q, unit: pm.get(pid)?.unit ?? '', left: r.left.find((x) => x.product_id === pid)?.qty ?? 0 })),
     }),
   });
-  const reset = () => { setDone(null); setUsed({}); setTeeth(new Set()); setWorkId(null); setCatId(null); setStep('cats'); };
+  const reset = () => { setDone(null); setUsed({}); setDisc({ open: false, mode: 'sum', val: '' }); setTeeth(new Set()); setWorkId(null); setCatId(null); setStep('cats'); };
 
+  // "Chegirma": bosilganda so'm yoki foizda kiritiladi.
+  const discBox = !disc.open ? (
+    <button type="button" onClick={() => setDisc({ ...disc, open: true })} className="text-sm font-medium text-primary-hover underline decoration-dotted underline-offset-4">
+      {discount > 0 ? `Chegirma: −${money(discount)} so‘m${disc.mode === 'pct' ? ` (${Math.min(dv, 100)}%)` : ''}` : '+ Chegirma'}
+    </button>
+  ) : (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-sm font-medium">Chegirma</span>
+      <input autoFocus type="number" min={0} inputMode="decimal" value={disc.val} onChange={(e) => setDisc({ ...disc, val: e.target.value })} aria-label="Chegirma miqdori"
+        placeholder={disc.mode === 'pct' ? '10' : '50000'} className="h-9 w-32 rounded-lg border border-line bg-white px-2.5 text-sm" />
+      <div role="radiogroup" aria-label="Chegirma turi" className="flex rounded-lg bg-muted p-[3px]">
+        {([['sum', 'so‘m'], ['pct', '%']] as const).map(([k, l]) => (
+          <button key={k} type="button" role="radio" aria-checked={disc.mode === k} onClick={() => setDisc({ ...disc, mode: k })}
+            className={cx('h-8 min-w-11 rounded-md px-2.5 text-sm', disc.mode === k ? 'bg-white font-semibold shadow-[0_1px_3px_rgba(7,18,30,.12)]' : 'text-sub')}>{l}</button>
+        ))}
+      </div>
+      {work && discount > 0 && <span className="text-sm text-sub">−{money(discount)} so‘m → <b className="text-fg">{money(net)}</b></span>}
+      <button type="button" onClick={() => setDisc({ ...disc, open: false })} className="h-9 px-2 text-sm text-primary-hover">Tayyor</button>
+      {discount > 0 && <button type="button" onClick={() => setDisc({ open: false, mode: 'sum', val: '' })} className="h-9 px-2 text-sm text-sub">Bekor</button>}
+    </div>
+  );
   const crumbs: [string, Step | null][] = [['Kategoriya', 'cats']];
   if (cat) { if (cat.ask_teeth) crumbs.push([tooth ? `Tish: ${tooth}` : 'Tish formulasi', 'teeth']); crumbs.push([cat.name, 'works']); }
   if (work) crumbs.push([work.name, 'mats']);
@@ -245,11 +273,15 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                       <span className="text-base leading-tight font-semibold sm:text-[19px]">{w.name}</span>
                       {w.id === workId && <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-full bg-primary text-white"><Check size={16} /></span>}
                     </span>
+                    <span className="text-[15px] font-semibold text-primary-hover">
+                      {money(Number(w.price))} so‘m{nTeeth > 1 && <span className="font-normal text-sub"> × {nTeeth} = <b className="font-semibold text-fg">{money(Number(w.price) * nTeeth)}</b></span>}
+                    </span>
                     <span className="mt-auto text-sm text-sub">{n ? `${n} ta material` : 'Material biriktirilmagan'}</span>
                   </button>
                 );
               })}
               {works.length === 0 && <div className="text-sm text-sub">Bu kategoriyada ish yo‘q.</div>}
+              <div className="col-span-full">{discBox}</div>
             </div>
           )}
 
@@ -309,6 +341,12 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                 <div className="border-b border-line px-4 py-3">
                   <div className="text-lg font-semibold">{work?.name}</div>
                   <div className="text-sm text-sub">{cat?.name}{tooth && <> · tish <b className="text-fg">{tooth}</b></>}</div>
+                </div>
+                <div className="flex flex-col gap-1 border-b border-line bg-surface px-4 py-3 text-sm">
+                  <div className="flex justify-between"><span>Narx{nTeeth > 1 && ` (${money(Number(work?.price ?? 0))} × ${nTeeth} tish)`}</span><span className="tabular-nums">{money(gross)} so‘m</span></div>
+                  {discount > 0 && <div className="flex justify-between text-bad"><span>Chegirma{disc.mode === 'pct' ? ` (${Math.min(dv, 100)}%)` : ''}</span><span className="tabular-nums">−{money(discount)} so‘m</span></div>}
+                  <div className="flex justify-between text-base font-semibold"><span>Jami</span><span className="tabular-nums">{money(net)} so‘m</span></div>
+                  <div className="mt-1">{discBox}</div>
                 </div>
                 {chosen.length === 0 && <div className="px-4 py-4 text-sm text-sub">Material tanlanmagan — faqat ish yoziladi.</div>}
                 {chosen.map(([pid, q]) => {

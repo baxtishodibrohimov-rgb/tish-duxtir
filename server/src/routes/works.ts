@@ -11,6 +11,9 @@ import { bad, forbidden, notFound } from '../errors.js';
 const Body = z.object({
   items: z.array(z.string().uuid()).min(1, 'Ishni tanlang').max(50),
   tooth: z.string().max(300).nullable().optional(), // "36, 37" yoki "Barcha tishlar"
+  qty: z.number().int().min(1).max(64).optional(),     // nechta tish — narx shunga ko'payadi
+  discount: z.number().int().min(0).optional(),        // chegirma, so'm
+  discount_pct: z.number().min(0).max(100).nullable().optional(), // foizda berilgan bo'lsa (ko'rsatish uchun)
   materials: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().positive().max(100000), group: z.string().max(120).nullable().optional() })).max(200),
   warehouse_id: z.string().uuid().nullable().optional(),
 });
@@ -34,9 +37,14 @@ async function recordWorks(c: Db, m: MemberCtx, x: Ctx, b: WorkBody) {
                                  values ($1, $2, $3, $4, $5, $6, ($7::timestamptz at time zone 'Asia/Tashkent')::date, $8) returning id`,
     [m.org_id, x.branch_id, x.patient_id, x.visit_id, x.doctor_id, wh?.id ?? null, x.date, m.user_id]);
   const tooth = b.tooth?.trim() || null;
+  // Narx har doim tishlar soniga ko'payadi; chegirma jami summadan oshmaydi.
+  const qty = b.qty ?? 1;
+  const gross = items.reduce((a, it) => a + Number(it.price) * qty, 0);
+  const discount = Math.min(b.discount ?? 0, gross);
+  if (discount) await c.query('update acts set discount = $2 where id = $1', [act.id, discount]);
   for (const id of b.items) {
     const it = items.find((r) => r.id === id)!;
-    await c.query('insert into act_items (act_id, price_item_id, name, tooth, qty, price) values ($1, $2, $3, $4, 1, $5)', [act.id, it.id, it.name, tooth, it.price]);
+    await c.query('insert into act_items (act_id, price_item_id, name, tooth, qty, price) values ($1, $2, $3, $4, $5, $6)', [act.id, it.id, it.name, tooth, qty, it.price]);
   }
   // Akt yopiladi. close_act() kalkulyatsiya kartasi bo'yicha chiqaradi — bu yerda esa shifokor belgilagan miqdor.
   await c.query(`update acts set status = 'closed' where id = $1`, [act.id]);
@@ -73,8 +81,8 @@ async function recordWorks(c: Db, m: MemberCtx, x: Ctx, b: WorkBody) {
     groups.set(g, list);
   }
   const details = {
-    kind: 'works', category: info[0]?.cat ?? null, works: info.map((x) => ({ name: x.name, price: Number(x.price) })),
-    total: info.reduce((a, x) => a + Number(x.price), 0), tooth,
+    kind: 'works', category: info[0]?.cat ?? null, works: info.map((x) => ({ name: x.name, price: Number(x.price), qty })),
+    gross, discount, discount_pct: b.discount_pct ?? null, total: gross - discount, tooth,
     groups: [...groups.entries()].map(([name, items]) => ({ name, items })),
   };
   await c.query('update treatment_records set details = $2 where act_id = $1', [act.id, JSON.stringify(details)]);

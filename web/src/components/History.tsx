@@ -18,7 +18,8 @@ interface HRecord {
   details: WorkDetails | null;
 }
 interface WorkDetails {
-  kind: 'works'; category: string | null; works: { name: string; price: number }[]; total: number; tooth: string | null;
+  kind: 'works'; category: string | null; works: { name: string; price: number; qty?: number }[]; total: number; tooth: string | null;
+  gross?: number; discount?: number; discount_pct?: number | null;
   groups: { name: string; items: { name: string; qty: number; unit: string }[] }[];
 }
 
@@ -240,7 +241,11 @@ function WorksBlock({ r }: { r: HRecord }) {
       <EntryHead uid={r.doctor_id} at={r.created_at} />
       <div className="flex flex-col gap-2.5 pl-11">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[#3d4858]">
-          {d.works.map((w, i) => <span key={i}><b className="font-medium text-fg">{w.name}</b> — {money(w.price)} so‘m</span>)}
+          {d.works.map((w, i) => (
+            <span key={i}><b className="font-medium text-fg">{w.name}</b> — {money(w.price)} so‘m{(w.qty ?? 1) > 1 && <> × {w.qty} = {money(w.price * (w.qty ?? 1))} so‘m</>}</span>
+          ))}
+          {!!d.discount && <span className="text-bad">chegirma −{money(d.discount)}{d.discount_pct ? ` (${d.discount_pct}%)` : ''}</span>}
+          {!!d.discount && <span>jami <b className="font-semibold text-fg">{money(d.total)} so‘m</b></span>}
           {d.tooth && <span className="rounded-full bg-[#e6f6fc] px-2 py-0.5 text-xs font-semibold text-[#075985]">🦷 {d.tooth}</span>}
           <span className="rounded-full bg-ok-soft px-2 py-0.5 text-xs font-medium text-[#166534]">Material xarajat</span>
         </div>
