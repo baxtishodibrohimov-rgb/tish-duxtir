@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, X, Check, ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
+import { CheckCircle2, X, Check, ChevronLeft, ChevronRight, Minus, Plus, Tag } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { http } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
@@ -45,6 +45,35 @@ interface CardRow { price_item_id: string; product_id: string; qty: number; grou
 interface ProdRow { id: string; name: string; unit: string; brand: string | null; image_path: string | null; qty: number }
 interface Catalog { warehouse_id: string | null; cats: CatRow[]; items: ItemRow[]; groups: GroupRow[]; cards: CardRow[]; products: ProdRow[] }
 type Step = 'cats' | 'teeth' | 'works' | 'mats' | 'sum';
+interface Disc { mode: 'sum' | 'pct'; val: string }
+const calcDisc = (d: Disc | undefined, gross: number) => {
+  const v = Math.max(0, Number(d?.val) || 0);
+  return Math.min(gross, Math.round(d?.mode === 'pct' ? (gross * Math.min(v, 100)) / 100 : v));
+};
+
+/**
+ * Sensorli ekranda surish: ↑ ↓ ← → (sichqonchada ishlamaydi — u yerda tugmalar).
+ * Surishdan keyin keladigan "click" bekor qilinadi.
+ */
+const SW = { x0: 0, y0: 0, id: -1 }; // bir vaqtda bitta surish — qayta chizilishdan qat'i nazar saqlanadi
+function swipe(h: { onUp?: () => void; onDown?: () => void; onLeft?: () => void; onRight?: () => void }) {
+  return {
+    onPointerDown: (e: React.PointerEvent) => { if (e.pointerType === 'mouse') return; SW.x0 = e.clientX; SW.y0 = e.clientY; SW.id = e.pointerId; },
+    onPointerUp: (e: React.PointerEvent) => {
+      if (e.pointerId !== SW.id) return;
+      SW.id = -1;
+      const dx = e.clientX - SW.x0, dy = e.clientY - SW.y0, T = 28;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < T) return;
+      e.stopPropagation();
+      const kill = (ev: Event) => { ev.stopPropagation(); ev.preventDefault(); };
+      window.addEventListener('click', kill, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener('click', kill, { capture: true }), 350);
+      if (Math.abs(dy) > Math.abs(dx)) (dy < 0 ? h.onUp : h.onDown)?.();
+      else (dx > 0 ? h.onRight : h.onLeft)?.();
+    },
+    onPointerCancel: () => { SW.id = -1; },
+  };
+}
 
 /** Tanlangan tishlar matni: hammasi bo'lsa — "Barcha tishlar", aks holda tartiblangan raqamlar. */
 function teethText(sel: Set<number>) {
@@ -92,11 +121,19 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
   const tooth = cat?.ask_teeth ? teethText(teeth) : '';
   // Narx har doim tishlar soniga ko'payadi (tish so'ralmagan kategoriyada — 1).
   const nTeeth = cat?.ask_teeth ? Math.max(1, teeth.size) : 1;
-  const [disc, setDisc] = useState<{ open: boolean; mode: 'sum' | 'pct'; val: string }>({ open: false, mode: 'sum', val: '' });
+  // Chegirma har bir ishga alohida (ish kartasi ostidagi chiziqda kiritiladi).
+  const [discs, setDiscs] = useState<Record<string, Disc>>({});
+  const [discEdit, setDiscEdit] = useState<string | null>(null);
+  const discOf = (wid: string | null | undefined, price: number) => calcDisc(discs[wid ?? ''], price * nTeeth);
   const gross = work ? Number(work.price) * nTeeth : 0;
+  const disc = discs[workId ?? ''] ?? { mode: 'sum' as const, val: '' };
   const dv = Math.max(0, Number(disc.val) || 0);
-  const discount = Math.min(gross, Math.round(disc.mode === 'pct' ? (gross * Math.min(dv, 100)) / 100 : dv));
+  const discount = work ? discOf(work.id, Number(work.price)) : 0;
   const net = gross - discount;
+  const setDisc = (wid: string, d: Disc) => setDiscs({ ...discs, [wid]: d });
+  // Guruh almashganda suzish yo'nalishi va "+1/−1" yonib o'chishi
+  const [slide, setSlide] = useState<'r' | 'l'>('r');
+  const [pop, setPop] = useState<{ pid: string; txt: string; k: number } | null>(null);
 
   const setU = (pid: string, q: number) => { const u = { ...used }; if (q > 0) u[pid] = +q.toFixed(3); else delete u[pid]; setUsed(u); };
   const pickCat = (id: string) => { const x = c!.cats.find((k) => k.id === id)!; setCatId(id); setWorkId(null); setUsed({}); setStep(x.ask_teeth ? 'teeth' : 'works'); };
@@ -108,6 +145,17 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
     else if (step === 'mats') { if (gi > 0) setGi(gi - 1); else setStep('works'); }
     else if (step === 'works') setStep(cat?.ask_teeth ? 'teeth' : 'cats');
     else if (step === 'teeth') setStep('cats');
+  };
+  const goGroup = (dir: 1 | -1) => {
+    if (dir > 0) { setSlide('r'); if (gi < groups.length - 1) setGi(gi + 1); else setStep('sum'); }
+    else if (gi > 0) { setSlide('l'); setGi(gi - 1); }
+  };
+  const bump = (pid: string, delta: number, base: number) => {
+    const q = used[pid] ?? 0;
+    if (delta < 0 && q <= 0) return; // 0 bo'lsa kamaymaydi
+    const n = Math.max(0, +(q + delta * base).toFixed(3));
+    setU(pid, n);
+    setPop({ pid, txt: delta > 0 ? `+${fq(base)}` : `−${fq(base)}`, k: Date.now() });
   };
   const next = () => {
     if (step === 'teeth') setStep('works');
@@ -127,29 +175,36 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
       mats: chosen.map(([pid, q]) => ({ name: pm.get(pid)?.name ?? '', q, unit: pm.get(pid)?.unit ?? '', left: r.left.find((x) => x.product_id === pid)?.qty ?? 0 })),
     }),
   });
-  const reset = () => { setDone(null); setUsed({}); setDisc({ open: false, mode: 'sum', val: '' }); setTeeth(new Set()); setWorkId(null); setCatId(null); setStep('cats'); };
+  const reset = () => { setDone(null); setUsed({}); setDiscs({}); setDiscEdit(null); setTeeth(new Set()); setWorkId(null); setCatId(null); setStep('cats'); };
 
-  // "Chegirma": bosilganda so'm yoki foizda kiritiladi.
-  const discBox = !disc.open ? (
-    <button type="button" onClick={() => setDisc({ ...disc, open: true })} className="text-sm font-medium text-primary-hover underline decoration-dotted underline-offset-4">
-      {discount > 0 ? `Chegirma: −${money(discount)} so‘m${disc.mode === 'pct' ? ` (${Math.min(dv, 100)}%)` : ''}` : '+ Chegirma'}
-    </button>
-  ) : (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-sm font-medium">Chegirma</span>
-      <input autoFocus type="number" min={0} inputMode="decimal" value={disc.val} onChange={(e) => setDisc({ ...disc, val: e.target.value })} aria-label="Chegirma miqdori"
-        placeholder={disc.mode === 'pct' ? '10' : '50000'} className="h-9 w-32 rounded-lg border border-line bg-white px-2.5 text-sm" />
-      <div role="radiogroup" aria-label="Chegirma turi" className="flex rounded-lg bg-muted p-[3px]">
-        {([['sum', 'so‘m'], ['pct', '%']] as const).map(([k, l]) => (
-          <button key={k} type="button" role="radio" aria-checked={disc.mode === k} onClick={() => setDisc({ ...disc, mode: k })}
-            className={cx('h-8 min-w-11 rounded-md px-2.5 text-sm', disc.mode === k ? 'bg-white font-semibold shadow-[0_1px_3px_rgba(7,18,30,.12)]' : 'text-sub')}>{l}</button>
-        ))}
+  /** Chegirma chizig'i: yopiq — "🏷 Chegirma" (yoki qo'yilgan chegirma), ochiq — summa va so'm|%. */
+  const discStrip = (wid: string, price: number, wide?: boolean) => {
+    const d = discs[wid] ?? { mode: 'sum' as const, val: '' };
+    const g = price * nTeeth, amt = calcDisc(d, g), v = Math.max(0, Number(d.val) || 0);
+    if (discEdit !== wid) return (
+      <button type="button" onClick={(e) => { e.stopPropagation(); setDiscEdit(wid); }}
+        className={cx('flex h-9 w-full items-center gap-2 px-3 text-left text-[13px] font-medium whitespace-nowrap', amt ? 'bg-[#fff1e0] text-[#b45309]' : 'bg-[#fff7ed] text-[#c2410c] hover:bg-[#ffedd5]', wide && 'rounded-lg')}>
+        <Tag size={14} />
+        {amt ? <><span className="truncate">−{d.mode === 'pct' ? `${Math.min(v, 100)}% · ` : ''}{money(amt)}</span><span className="ml-auto flex-none font-semibold">{money(g - amt)}</span></> : 'Chegirma'}
+      </button>
+    );
+    return (
+      <div onClick={(e) => e.stopPropagation()} className={cx('flex flex-wrap items-center gap-1.5 bg-[#fff7ed] px-2 py-1.5', wide && 'rounded-lg')}>
+        <Tag size={14} className="text-[#c2410c]" />
+        <input autoFocus type="number" min={0} inputMode="decimal" value={d.val} onChange={(e) => setDisc(wid, { ...d, val: e.target.value })} aria-label="Chegirma miqdori"
+          onKeyDown={(e) => { if (e.key === 'Enter') setDiscEdit(null); }}
+          placeholder={d.mode === 'pct' ? '10' : '50000'} className="h-8 w-24 min-w-0 flex-1 rounded-md border border-[#fdba74] bg-white px-2 text-sm" />
+        <div role="radiogroup" aria-label="Chegirma turi" className="flex rounded-md bg-white p-0.5 ring-1 ring-[#fdba74]">
+          {([['sum', 'so‘m'], ['pct', '%']] as const).map(([k, l]) => (
+            <button key={k} type="button" role="radio" aria-checked={d.mode === k} onClick={() => setDisc(wid, { ...d, mode: k })}
+              className={cx('h-7 min-w-9 rounded px-2 text-[13px]', d.mode === k ? 'bg-[#f97316] font-semibold text-white' : 'text-[#9a3412]')}>{l}</button>
+          ))}
+        </div>
+        <button type="button" onClick={() => setDiscEdit(null)} aria-label="Tayyor" className="grid h-8 w-8 place-items-center rounded-md bg-[#f97316] text-white"><Check size={15} /></button>
+        {amt > 0 && <span className="w-full text-xs text-[#9a3412]">−{money(amt)} → <b>{money(g - amt)} so‘m</b></span>}
       </div>
-      {work && discount > 0 && <span className="text-sm text-sub">−{money(discount)} so‘m → <b className="text-fg">{money(net)}</b></span>}
-      <button type="button" onClick={() => setDisc({ ...disc, open: false })} className="h-9 px-2 text-sm text-primary-hover">Tayyor</button>
-      {discount > 0 && <button type="button" onClick={() => setDisc({ open: false, mode: 'sum', val: '' })} className="h-9 px-2 text-sm text-sub">Bekor</button>}
-    </div>
-  );
+    );
+  };
   const crumbs: [string, Step | null][] = [['Kategoriya', 'cats']];
   if (cat) { if (cat.ask_teeth) crumbs.push([tooth ? `Tish: ${tooth}` : 'Tish formulasi', 'teeth']); crumbs.push([cat.name, 'works']); }
   if (work) crumbs.push([work.name, 'mats']);
@@ -264,24 +319,28 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
           )}
 
           {step === 'works' && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] sm:gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] sm:gap-4">
               {works.map((w) => {
                 const n = c!.cards.filter((x) => x.price_item_id === w.id).length;
+                const g = Number(w.price) * nTeeth, d = discOf(w.id, Number(w.price));
                 return (
-                  <button key={w.id} type="button" onClick={() => pickWork(w.id)} className={cx(CARD(w.id === workId), 'min-h-[104px] !p-3 sm:min-h-[150px] sm:!p-[18px]')}>
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="text-base leading-tight font-semibold sm:text-[19px]">{w.name}</span>
-                      {w.id === workId && <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-full bg-primary text-white"><Check size={16} /></span>}
-                    </span>
-                    <span className="text-[15px] font-semibold text-primary-hover">
-                      {money(Number(w.price))} so‘m{nTeeth > 1 && <span className="font-normal text-sub"> × {nTeeth} = <b className="font-semibold text-fg">{money(Number(w.price) * nTeeth)}</b></span>}
-                    </span>
-                    <span className="mt-auto text-sm text-sub">{n ? `${n} ta material` : 'Material biriktirilmagan'}</span>
-                  </button>
+                  <div key={w.id} className={cx('flex flex-col overflow-hidden rounded-[14px] shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]', w.id === workId ? 'border-2 border-primary bg-[#f2fbff]' : 'border border-line bg-white')}>
+                    <button type="button" onClick={() => pickWork(w.id)} className="flex min-h-[104px] flex-1 flex-col gap-2 p-3 text-left sm:min-h-[140px] sm:p-[18px]">
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-base leading-tight font-semibold sm:text-[19px]">{w.name}</span>
+                        {w.id === workId && <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-full bg-primary text-white"><Check size={16} /></span>}
+                      </span>
+                      <span className="text-[15px] font-semibold text-primary-hover">
+                        {money(Number(w.price))} so‘m{nTeeth > 1 && <span className="font-normal text-sub"> × {nTeeth} = <b className={cx('font-semibold text-fg', d > 0 && 'text-sub line-through')}>{money(g)}</b></span>}
+                        {d > 0 && <b className="ml-1.5 text-[#b45309]">{money(g - d)}</b>}
+                      </span>
+                      <span className="mt-auto text-sm text-sub">{n ? `${n} ta material` : 'Material biriktirilmagan'}</span>
+                    </button>
+                    {discStrip(w.id, Number(w.price))}
+                  </div>
                 );
               })}
               {works.length === 0 && <div className="text-sm text-sub">Bu kategoriyada ish yo‘q.</div>}
-              <div className="col-span-full">{discBox}</div>
             </div>
           )}
 
@@ -303,29 +362,35 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                     );
                   })}
                 </div>
-                <h3 className="m-0 text-xl font-semibold">{grp.name} <span className="text-base font-normal text-sub">· guruh {gi + 1}/{groups.length}</span></h3>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-4">
+                <h3 className="m-0 text-xl font-semibold">{grp.name} <span className="text-base font-normal text-sub">· guruh {gi + 1}/{groups.length}</span>
+                  <span className="ml-2 hidden text-xs font-normal text-faint [@media(pointer:coarse)]:inline">kartani ↑ surish +, ↓ surish −; ekranni → keyingi, ← oldingi guruh</span></h3>
+                <div key={`${gi}`} {...swipe({ onRight: () => goGroup(1), onLeft: () => goGroup(-1) })} style={{ touchAction: 'pan-y' }}
+                  className={cx('grid min-h-[50vh] grid-cols-2 content-start gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4', slide === 'r' ? 'td-in-r' : 'td-in-l')}>
                   {grp.cards.map((x) => {
                     const p = pm.get(x.product_id)!;
                     const q = used[p.id] ?? 0, on = q > 0, st = x.qty % 1 ? x.qty : 1;
                     return (
-                      <div key={p.id} className={cx('flex flex-col overflow-hidden rounded-[14px] bg-white', on ? 'border-2 border-primary' : 'border border-line')}>
-                        <button type="button" onClick={() => setU(p.id, on ? 0 : x.qty)} aria-pressed={on} aria-label={`${p.name}${on ? ': olib tashlash' : ': tanlash'}`} className="relative">
-                          <ProductThumb id={p.id} path={p.image_path} size={0} className="h-[104px] w-full rounded-none sm:h-[130px]" />
-                          {on && <span className="absolute top-2 right-2 grid h-7 w-7 place-items-center rounded-full bg-primary text-white shadow"><Check size={16} /></span>}
+                      <div key={p.id} {...swipe({ onUp: () => bump(p.id, 1, st), onDown: () => bump(p.id, -1, st), onRight: () => goGroup(1), onLeft: () => goGroup(-1) })}
+                        style={{ touchAction: 'none' }}
+                        className={cx('relative flex flex-col overflow-hidden rounded-2xl bg-white select-none', on ? 'border-[3px] border-primary shadow-[0_4px_16px_rgba(0,134,184,.18)]' : 'border border-line')}>
+                        <button type="button" onClick={() => { if (!on) bump(p.id, 1, x.qty); }} aria-pressed={on} aria-label={`${p.name}${on ? '' : ': tanlash'}`} className="relative">
+                          <ProductThumb id={p.id} path={p.image_path} size={0} className="h-[150px] w-full rounded-none sm:h-[190px]" />
+                          {on && <span className="absolute top-2 right-2 rounded-full bg-primary px-3 py-1 text-lg font-bold text-white shadow tabular-nums">{fq(q)} {p.unit}</span>}
+                          {pop?.pid === p.id && <span key={pop.k} className="td-pop pointer-events-none absolute inset-0 grid place-items-center text-5xl font-extrabold text-primary [text-shadow:0_2px_8px_rgba(255,255,255,.9)]">{pop.txt}</span>}
                         </button>
-                        <div className="flex flex-1 flex-col gap-1.5 p-3">
-                          <span className="text-[15px] leading-tight font-semibold">{p.name}</span>
-                          <span className="text-xs text-sub">{[p.brand, `omborda ${fq(p.qty)} ${p.unit}`].filter(Boolean).join(' · ')}</span>
+                        <div className="flex flex-1 flex-col gap-1.5 p-3.5">
+                          <span className="text-[17px] leading-tight font-semibold">{p.name}</span>
+                          <span className="text-[13px] text-sub">{[p.brand, `omborda ${fq(p.qty)} ${p.unit}`].filter(Boolean).join(' · ')}</span>
                           {on ? (
-                            <span className="mt-auto flex items-center overflow-hidden rounded-lg border border-[#b6e3f4]">
-                              <button type="button" onClick={() => setU(p.id, q - st)} aria-label={`${p.name}: kamaytirish`} className="grid h-10 w-10 place-items-center bg-[#f2fbff]"><Minus size={16} /></button>
+                            <span className="mt-auto flex items-center overflow-hidden rounded-lg border border-[#b6e3f4] [@media(pointer:coarse)]:hidden">
+                              <button type="button" onClick={() => bump(p.id, -1, st)} aria-label={`${p.name}: kamaytirish`} className="grid h-10 w-10 place-items-center bg-[#f2fbff]"><Minus size={16} /></button>
                               <span className="flex-1 text-center text-[15px] font-bold tabular-nums">{fq(q)} {p.unit}</span>
-                              <button type="button" onClick={() => setU(p.id, q + st)} aria-label={`${p.name}: ko‘paytirish`} className="grid h-10 w-10 place-items-center bg-[#f2fbff]"><Plus size={16} /></button>
+                              <button type="button" onClick={() => bump(p.id, 1, st)} aria-label={`${p.name}: ko‘paytirish`} className="grid h-10 w-10 place-items-center bg-[#f2fbff]"><Plus size={16} /></button>
                             </span>
                           ) : (
-                            <button type="button" onClick={() => setU(p.id, x.qty)} className="mt-auto h-10 rounded-lg border border-dashed border-primary text-sm text-primary-hover">+ {fq(x.qty)} {p.unit}</button>
+                            <button type="button" onClick={() => bump(p.id, 1, x.qty)} className="mt-auto h-10 rounded-lg border border-dashed border-primary text-sm text-primary-hover [@media(pointer:coarse)]:hidden">+ {fq(x.qty)} {p.unit}</button>
                           )}
+                          {on && <span className="mt-auto hidden text-center text-xs text-faint [@media(pointer:coarse)]:block">↑ qo‘shish · ↓ ayirish</span>}
                         </div>
                       </div>
                     );
@@ -346,7 +411,7 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                   <div className="flex justify-between"><span>Narx{nTeeth > 1 && ` (${money(Number(work?.price ?? 0))} × ${nTeeth} tish)`}</span><span className="tabular-nums">{money(gross)} so‘m</span></div>
                   {discount > 0 && <div className="flex justify-between text-bad"><span>Chegirma{disc.mode === 'pct' ? ` (${Math.min(dv, 100)}%)` : ''}</span><span className="tabular-nums">−{money(discount)} so‘m</span></div>}
                   <div className="flex justify-between text-base font-semibold"><span>Jami</span><span className="tabular-nums">{money(net)} so‘m</span></div>
-                  <div className="mt-1">{discBox}</div>
+                  {work && <div className="mt-1 overflow-hidden">{discStrip(work.id, Number(work.price), true)}</div>}
                 </div>
                 {chosen.length === 0 && <div className="px-4 py-4 text-sm text-sub">Material tanlanmagan — faqat ish yoziladi.</div>}
                 {chosen.map(([pid, q]) => {
@@ -373,7 +438,7 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
           <button type="button" onClick={onClose} className={cx(BTN, 'border border-line bg-white')}>Bekor qilish</button>
           {step === 'teeth' && <button type="button" disabled={!teeth.size} onClick={next} className={cx(BTN, 'bg-primary font-semibold text-white disabled:opacity-50')}>Davom etish <ChevronRight size={18} /></button>}
           {step === 'mats' && (groups.length && gi < groups.length - 1
-            ? <button type="button" onClick={next} className={cx(BTN, 'bg-primary font-semibold text-white')}>Keyingi guruh <ChevronRight size={18} /></button>
+            ? <button type="button" onClick={() => goGroup(1)} className={cx(BTN, 'bg-primary font-semibold text-white')}>Keyingi guruh <ChevronRight size={18} /></button>
             : <button type="button" onClick={() => setStep('sum')} className={cx(BTN, 'bg-primary font-semibold text-white')}>Yakunlash <ChevronRight size={18} /></button>)}
           {step === 'sum' && <button type="button" disabled={accept.isPending} onClick={() => accept.mutate(undefined)} className={cx(BTN, 'bg-ok font-semibold text-white disabled:opacity-60')}><Check size={18} /> Tasdiqlash</button>}
         </div>

@@ -85,3 +85,12 @@
 .tree-node { position: relative; }
 .tree-children > .tree-node::before { content: ""; position: absolute; left: -12px; top: 15px; width: 10px; border-top: 1px dotted #9aa3ad; }
 
+
+/* Material xarajat: "+1 / −1" yonib o'chishi va guruh almashganda suzish */
+@keyframes td-pop { 0% { opacity: 0; transform: translateY(8px) scale(.8); } 25% { opacity: 1; transform: translateY(0) scale(1.1); } 100% { opacity: 0; transform: translateY(-28px) scale(1); } }
+@keyframes td-in-r { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
+@keyframes td-in-l { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: none; } }
+.td-pop { animation: td-pop .7s ease-out forwards; }
+.td-in-r { animation: td-in-r .22s ease-out; }
+.td-in-l { animation: td-in-l .22s ease-out; }
+@media (prefers-reduced-motion: reduce) { .td-pop, .td-in-r, .td-in-l { animation-duration: .01s; } }
