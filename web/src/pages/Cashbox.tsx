@@ -147,7 +147,7 @@ export function Cashbox() {
   );
 }
 
-interface Summary { work_done: number; income: number; expense: number; profit: number; cashboxes: { cashbox_id: string; name: string; method: string; balance: number; period_income: number }[] }
+interface Summary { work_done: number; income: number; expense: number; profit: number; cashboxes: { cashbox_id: string; name: string; method: string; balance: number; period_income: number; period_out: number; period_in_transfer: number }[] }
 const METHOD_COLOR: Record<string, string> = { cash: 'text-ok', terminal: 'text-primary', click: 'text-[#9333ea]', bank: 'text-sub', other: 'text-sub' };
 
 interface Details {
@@ -166,6 +166,7 @@ function Boxes({ period }: { period: Period }) {
   const s = useQuery({ queryKey: ['cash', 'summary', branch.id, from, to], queryFn: () => http.get<Summary>(`/api/cash/summary?branch_id=${branch.id}&from=${from}&to=${to}`) });
   const det = useQuery({ queryKey: ['cash', 'details', branch.id, from, to], queryFn: () => http.get<Details>(`/api/cash/details?branch_id=${branch.id}&from=${from}&to=${to}`) });
   const [open, setOpen] = useState<CardKey | null>(null);
+  const [boxOpen, setBoxOpen] = useState<string | null>(null);
   const [doc, setDoc] = useState<string | null>(null);
   const incomeRows = useMemo(() => (det.data?.income ?? []).filter((m) => m.kind === 'income'), [det.data]);
   const docs = useDocs(incomeRows);
@@ -240,14 +241,26 @@ function Boxes({ period }: { period: Period }) {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {d.cashboxes.map((b) => {
           const Ic = METHOD_ICON[b.method] ?? Banknote;
+          const on = boxOpen === b.cashbox_id;
+          const out = Number(b.period_out), tin = Number(b.period_in_transfer);
           return (
-            <section key={b.cashbox_id} className="flex flex-col gap-1.5 rounded-2xl border border-line bg-white p-4" title={`${lbl}: +${money(b.period_income)}`}>
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-sub"><Ic size={16} className={METHOD_COLOR[b.method]} /> {b.name}</span>
-              <span className="text-xl font-semibold">{som(b.balance)}</span>
-            </section>
+            <button key={b.cashbox_id} type="button" onClick={() => setBoxOpen(on ? null : b.cashbox_id)} aria-expanded={on}
+              className={cx('flex flex-col items-start gap-1.5 rounded-2xl border p-4 text-left', on ? 'border-primary bg-[#f2fbff]' : 'border-line bg-white hover:border-primary/50')}>
+              <span className="flex w-full items-center gap-1.5 text-[13px] text-sub"><Ic size={16} className={METHOD_COLOR[b.method]} /> {b.name}
+                <ChevronDown size={15} className={cx('ml-auto transition-transform', on && 'rotate-180')} /></span>
+              <span className="text-xl font-semibold text-ok">{lbl}: +{som(b.period_income)}</span>
+              <span className="text-xs text-sub">
+                {out > 0 && <span className="text-bad">chiqim −{money(out)} · </span>}
+                {tin > 0 && <span>kassadan +{money(tin)} · </span>}
+                qoldiq <b className="font-semibold text-fg">{som(b.balance)}</b>
+              </span>
+            </button>
           );
         })}
       </div>
+      {boxOpen && d.cashboxes.some((b) => b.cashbox_id === boxOpen) && (
+        <BoxDetail box={d.cashboxes.find((b) => b.cashbox_id === boxOpen)!} from={from} to={to} lbl={lbl} oneDay={oneDay} onClose={() => setBoxOpen(null)} />
+      )}
       <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-[0_1px_2px_rgba(7,18,30,.04),0_2px_8px_rgba(7,18,30,.04)]">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3.5">
           <Stethoscope size={18} className="text-primary" />
@@ -288,6 +301,60 @@ function Boxes({ period }: { period: Period }) {
 }
 
 /** Tushumni shifokorlar bo'yicha guruhlash (to'lovdagi shifokor, bo'lmasa akt shifokori). */
+/** Kassa kartasi bosilganda: shu kassaning tanlangan davrdagi barcha harakatlari. */
+function BoxDetail({ box, from, to, lbl, oneDay, onClose }: { box: Summary['cashboxes'][number]; from: string; to: string; lbl: string; oneDay: boolean; onClose: () => void }) {
+  const { memberName } = useOrg();
+  const range = { 'moved_at.gte': new Date(`${from}T00:00:00`).toISOString(), 'moved_at.lt': addDays(new Date(`${to}T00:00:00`), 1).toISOString() };
+  const own = useList<MoneyMove>('money_moves', { cashbox_id: box.cashbox_id, ...range }, { limit: 2000 });
+  const inc = useList<MoneyMove>('money_moves', { to_cashbox_id: box.cashbox_id, kind: 'transfer', ...range }, { limit: 2000 });
+  const rows = [...(own.data ?? []), ...(inc.data ?? [])].sort((a, b) => b.moved_at.localeCompare(a.moved_at));
+  const pids = [...new Set(rows.map((m) => m.patient_id).filter(Boolean))] as string[];
+  const pats = useList<Patient>('patients', { 'id.in': pids }, { enabled: pids.length > 0 });
+  const cps = useList<Counterparty>('counterparties');
+  const boxes = useList<Box>('cashboxes');
+  const pm = byId(pats.data), cm = byId(cps.data), bm = byId(boxes.data);
+  // Shu kassa nuqtai nazaridan: + kirdi, − chiqdi.
+  const sign = (m: MoneyMove) => (m.kind === 'income' || (m.kind === 'transfer' && m.to_cashbox_id === box.cashbox_id) ? 1 : -1);
+  const KIND: Record<string, string> = { income: 'To‘lov', refund: 'Qaytarish', expense: 'Xarajat', transfer: 'Kassadan kassaga' };
+  const who = (m: MoneyMove) => m.patient_id ? pm.get(m.patient_id)?.full_name ?? 'Bemor'
+    : m.counterparty_id ? cm.get(m.counterparty_id)?.name ?? ''
+    : m.kind === 'transfer' ? (sign(m) > 0 ? `${bm.get(m.cashbox_id)?.name ?? ''} dan` : `${bm.get(m.to_cashbox_id ?? '')?.name ?? ''} ga`) : '';
+  const total = rows.reduce((a, m) => a + sign(m) * m.amount, 0);
+  const NUM = 'px-3 py-2 text-right whitespace-nowrap tabular-nums';
+  return (
+    <section className="overflow-hidden rounded-2xl border border-primary bg-white">
+      <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+        <h3 className="m-0 flex-1 text-base font-semibold">{box.name} — {lbl}</h3>
+        <button type="button" onClick={onClose} aria-label="Yopish" className="grid h-8 w-8 place-items-center rounded-md text-sub hover:bg-muted"><X size={16} /></button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead className="bg-muted/70"><tr className="text-left text-xs text-sub uppercase">
+            <th className="px-3 py-2 font-medium">Vaqt</th><th className="px-3 py-2 font-medium">Turi</th><th className="px-3 py-2 font-medium">Kimdan / kimga</th>
+            <th className="px-3 py-2 font-medium">Izoh</th><th className="px-3 py-2 font-medium">Kiritdi</th><th className={cx(NUM, 'font-medium')}>Summa</th>
+          </tr></thead>
+          <tbody>
+            {(own.isLoading || inc.isLoading) && <tr><td colSpan={6} className="p-6 text-center text-sub">Yuklanmoqda…</td></tr>}
+            {!own.isLoading && !inc.isLoading && rows.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-sub">Bu davrda harakat yo‘q</td></tr>}
+            {rows.map((m) => (
+              <tr key={m.id} className="border-t border-line">
+                <td className="px-3 py-2 whitespace-nowrap text-sub">{oneDay ? hm(m.moved_at) : dmyhm(m.moved_at)}</td>
+                <td className="px-3 py-2">{KIND[m.kind] ?? m.kind}</td>
+                <td className="px-3 py-2 font-medium">{who(m) || '—'}</td>
+                <td className="max-w-[220px] truncate px-3 py-2 text-sub">{m.note}</td>
+                <td className="px-3 py-2 text-sub">{memberName(m.created_by)}</td>
+                <td className={cx(NUM, 'font-semibold', sign(m) > 0 ? 'text-ok' : 'text-bad')}>{sign(m) > 0 ? '+' : '−'}{money(m.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+          {rows.length > 0 && <tfoot><tr className="border-t-2 border-line font-semibold"><td colSpan={5} className="px-3 py-2">Davr bo‘yicha jami</td>
+            <td className={cx(NUM, total >= 0 ? 'text-ok' : 'text-bad')}>{total >= 0 ? '+' : '−'}{money(Math.abs(total))}</td></tr></tfoot>}
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function useDocs(rows: Details['income']) {
   return useMemo(() => {
     const m = new Map<string, { key: string; name: string; sum: number; pats: Set<string>; rows: Details['income'] }>();

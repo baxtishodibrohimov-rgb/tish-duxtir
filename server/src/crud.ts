@@ -90,7 +90,7 @@ const R: Record<string, Resource> = {
     columns: ['currency', 'rate', 'rate_date'], filters: ['currency', 'rate_date'], order: 'rate_date desc' },
   money_moves: { table: 'money_moves', scope: 'branch', read: 'cashbox.view', write: 'cashbox.edit',
     columns: ['kind', 'cashbox_id', 'to_cashbox_id', 'amount', 'patient_id', 'doctor_id', 'act_id', 'counterparty_id', 'category_id', 'stock_doc_id', 'note', 'moved_at'],
-    filters: ['branch_id', 'kind', 'cashbox_id', 'patient_id', 'doctor_id', 'counterparty_id', 'category_id', 'created_by', 'moved_at', 'stock_doc_id'],
+    filters: ['branch_id', 'kind', 'cashbox_id', 'to_cashbox_id', 'patient_id', 'doctor_id', 'counterparty_id', 'category_id', 'created_by', 'moved_at', 'stock_doc_id'],
     order: 'moved_at desc' },
 
   warehouses: { table: 'warehouses', scope: 'branch', read: null, write: 'warehouse.admin',

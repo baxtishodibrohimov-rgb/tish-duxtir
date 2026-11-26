@@ -113,7 +113,11 @@ export async function clinicRoutes(app: FastifyInstance) {
         `select b.cashbox_id, b.name, b.method, b.branch_id, b.balance,
                 coalesce((select sum(case when kind = 'income' then amount when kind = 'refund' then -amount else 0 end)
                             from money_moves mm where mm.cashbox_id = b.cashbox_id
-                             and mm.moved_at >= $3::date and mm.moved_at < $4::date + 1), 0) as period_income
+                             and mm.moved_at >= $3::date and mm.moved_at < $4::date + 1), 0) as period_income,
+                coalesce((select sum(amount) from money_moves mm where mm.cashbox_id = b.cashbox_id and mm.kind in ('expense', 'transfer')
+                             and mm.moved_at >= $3::date and mm.moved_at < $4::date + 1), 0) as period_out,
+                coalesce((select sum(amount) from money_moves mm where mm.to_cashbox_id = b.cashbox_id and mm.kind = 'transfer'
+                             and mm.moved_at >= $3::date and mm.moved_at < $4::date + 1), 0) as period_in_transfer
            from cashbox_balances b join cashboxes cb on cb.id = b.cashbox_id
           where b.org_id = $1 and b.branch_id = any($2) and not cb.archived order by cb.position`,
         [m.org_id, branches, q.from, q.to]);
