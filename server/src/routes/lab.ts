@@ -170,35 +170,44 @@ export async function labRoutes(app: FastifyInstance) {
   });
 
   // ---------- Texniklar hisob-kitobi (Kassa → Kontragentlar → Texniklar) ----------
-  app.get('/api/lab/technicians', async (req) => {
+  // branch_id berilsa — summalar faqat shu filial bo'yicha (buyurtma filiali, to'lov kassasi filiali).
+  const branchOf = (m: MemberCtx, v: unknown) => {
+    if (v === undefined || v === '') return null;
+    const br = z.string().uuid().parse(v);
+    if (!m.branch_ids.includes(br)) throw forbidden();
+    return br;
+  };
+  app.get<{ Querystring: Record<string, string> }>('/api/lab/technicians', async (req) => {
     const m = requireMember(req);
     if (!can(m, 'cashbox.view') && !can(m, 'patients.view')) throw forbidden();
+    const br = branchOf(m, req.query.branch_id);
     // Kassa ruxsati yo'q (masalan shifokor) — faqat ro'yxat (buyurtma oynasidagi tanlov uchun), summalarsiz.
     const money = can(m, 'cashbox.view');
     return tx(m.user_id, async (c) => (await many<any>(c, `
       select k.id, k.name, k.phone, k.archived,
-             (select count(*) from lab_orders o where o.technician_id = k.id and o.status <> 'cancelled')::int orders,
-             (select count(*) from lab_orders o where o.technician_id = k.id and o.status in ('to_send', 'at_lab', 'remake', 'ready'))::int active,
-             coalesce((select sum(o.tech_amount) from lab_orders o where o.technician_id = k.id and o.status <> 'cancelled'), 0)::bigint planned,
-             coalesce((select sum(e.earned) from lab_order_earned e where e.technician_id = k.id), 0)::bigint earned,
-             coalesce((select sum(mm.amount) from money_moves mm where mm.counterparty_id = k.id and mm.kind = 'expense'), 0)::bigint paid
+             (select count(*) from lab_orders o where o.technician_id = k.id and o.status <> 'cancelled' and ($2::uuid is null or o.branch_id = $2))::int orders,
+             (select count(*) from lab_orders o where o.technician_id = k.id and o.status in ('to_send', 'at_lab', 'remake', 'ready') and ($2::uuid is null or o.branch_id = $2))::int active,
+             coalesce((select sum(o.tech_amount) from lab_orders o where o.technician_id = k.id and o.status <> 'cancelled' and ($2::uuid is null or o.branch_id = $2)), 0)::bigint planned,
+             coalesce((select sum(e.earned) from lab_order_earned e join lab_orders o on o.id = e.order_id where e.technician_id = k.id and ($2::uuid is null or o.branch_id = $2)), 0)::bigint earned,
+             coalesce((select sum(mm.amount) from money_moves mm where mm.counterparty_id = k.id and mm.kind = 'expense' and ($2::uuid is null or mm.branch_id = $2)), 0)::bigint paid
         from counterparties k
        where k.org_id = $1 and k.type = 'technician'
-       order by k.archived, k.name`, [m.org_id])).map((r) => (money ? r : { ...r, planned: 0, earned: 0, paid: 0 })));
+       order by k.archived, k.name`, [m.org_id, br])).map((r) => (money ? r : { ...r, planned: 0, earned: 0, paid: 0 })));
   });
 
-  app.get<{ Params: { id: string } }>('/api/lab/technicians/:id', async (req) => {
+  app.get<{ Params: { id: string }; Querystring: Record<string, string> }>('/api/lab/technicians/:id', async (req) => {
     const m = requireMember(req);
     if (!can(m, 'cashbox.view')) throw forbidden();
+    const br = branchOf(m, req.query.branch_id);
     return tx(m.user_id, async (c) => {
       const k = await one<any>(c, `select id, name, phone, note from counterparties where id = $1 and org_id = $2 and type = 'technician'`, [req.params.id, m.org_id]);
       if (!k) throw notFound('Texnik topilmadi');
       const [orders, payments] = await Promise.all([
-        many(c, `${ORDER_SELECT} where o.technician_id = $1 and o.org_id = $2 order by o.number desc`, [k.id, m.org_id]),
+        many(c, `${ORDER_SELECT} where o.technician_id = $1 and o.org_id = $2 and ($3::uuid is null or o.branch_id = $3) order by o.number desc`, [k.id, m.org_id, br]),
         many(c, `select mm.id, mm.moved_at, mm.amount, mm.note, cb.name box,
                         (select full_name from members where user_id = mm.created_by and org_id = mm.org_id) by_name
                    from money_moves mm join cashboxes cb on cb.id = mm.cashbox_id
-                  where mm.counterparty_id = $1 and mm.kind = 'expense' order by mm.moved_at desc`, [k.id]),
+                  where mm.counterparty_id = $1 and mm.kind = 'expense' and ($2::uuid is null or mm.branch_id = $2) order by mm.moved_at desc`, [k.id, br]),
       ]);
       return { ...k, orders, payments };
     });

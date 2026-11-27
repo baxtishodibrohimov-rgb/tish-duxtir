@@ -13,10 +13,10 @@ import { Button, Card, Field, Input, Modal, PageLoader, Select, cx } from '@/com
 
 /** Texnikka yozilgan pul (bemor to'lagan sari) − texnikka to'langan = qarz. */
 export function TechList({ onOpen }: { onOpen: (id: string) => void }) {
-  const { can } = useOrg();
+  const { can, branch } = useOrg();
   const [add, setAdd] = useState(false);
   const [arch, setArch] = useState(false);
-  const q = useQuery({ queryKey: ['lab', 'technicians'], queryFn: () => http.get<TechRow[]>('/api/lab/technicians') });
+  const q = useQuery({ queryKey: ['lab', 'technicians', branch.id], queryFn: () => http.get<TechRow[]>(`/api/lab/technicians?branch_id=${branch.id}`) });
   if (q.isLoading) return <PageLoader />;
   const rows = (q.data ?? []).filter((r) => arch || !r.archived);
   const tot = rows.reduce((a, r) => ({ earned: a.earned + r.earned, paid: a.paid + r.paid, planned: a.planned + r.planned }), { earned: 0, paid: 0, planned: 0 });
@@ -27,7 +27,7 @@ export function TechList({ onOpen }: { onOpen: (id: string) => void }) {
         {can('cashbox.edit') && <button type="button" onClick={() => setAdd(true)} className="inline-flex h-9 items-center gap-1.5 rounded-[3px] bg-primary px-3.5 text-sm text-white"><Plus size={15} /> Texnik qo‘shish</button>}
         <label className="flex items-center gap-1.5 text-sm text-sub"><input type="checkbox" checked={arch} onChange={(e) => setArch(e.target.checked)} /> Arxiv</label>
         <span className="flex-1" />
-        <span className="text-sm text-sub">Jami qarz: <b className={tot.earned - tot.paid > 0 ? 'text-bad' : 'text-fg'}>{money(tot.earned - tot.paid)} so‘m</b></span>
+        <span className="text-sm text-sub">{branch.name} bo‘yicha · Jami qarz: <b className={tot.earned - tot.paid > 0 ? 'text-bad' : 'text-fg'}>{money(tot.earned - tot.paid)} so‘m</b></span>
       </div>
       <Card className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
@@ -75,7 +75,7 @@ interface TechDetail { id: string; name: string; phone: string | null; note: str
 
 export function TechProfile({ id, onBack }: { id: string; onBack: () => void }) {
   const { can, branch } = useOrg();
-  const q = useQuery({ queryKey: ['lab', 'technician', id], queryFn: () => http.get<TechDetail>(`/api/lab/technicians/${id}`) });
+  const q = useQuery({ queryKey: ['lab', 'technician', id, branch.id], queryFn: () => http.get<TechDetail>(`/api/lab/technicians/${id}?branch_id=${branch.id}`) });
   const boxes = useList<Cashbox>('cashboxes', { branch_id: branch.id, archived: false });
   const [pay, setPay] = useState<{ date: string; amt: string; note: string; box: string } | null>(null);
   const save = useAction(() => {
@@ -98,7 +98,7 @@ export function TechProfile({ id, onBack }: { id: string; onBack: () => void }) 
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3 rounded-md border border-line bg-white px-4 py-3">
         <span className="grid h-12 w-12 place-items-center rounded-full bg-[#f3e8ff] text-[#7c3aed]"><UserRound size={26} /></span>
-        <div className="flex flex-col"><h2 className="m-0 text-xl font-semibold">{t.name}</h2><span className="text-sm text-sub">Texnik{t.phone && ` · ${t.phone}`}</span></div>
+        <div className="flex flex-col"><h2 className="m-0 text-xl font-semibold">{t.name}</h2><span className="text-sm text-sub">Texnik{t.phone && ` · ${t.phone}`} · {branch.name} bo‘yicha</span></div>
         <span className="flex-1" />
         <Button size="sm" onClick={() => downloadXlsx(`${fileSafe(t.name)}.xlsx`, [
           { name: 'Buyurtmalar', bold: [0, 2, live.length + 3], rows: [[`${t.name} — buyurtmalar`], [], ['№', 'Sana', 'Bemor', 'Ish', 'Tish', 'Holat', 'Texnik narxi', 'Bemor to‘lagan %', 'Hisoblangan'],

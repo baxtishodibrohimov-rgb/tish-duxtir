@@ -101,7 +101,8 @@ function Writeoffs({ from, to }: { from: string; to: string }) {
 }
 
 function Debts() {
-  const q = useQuery({ queryKey: ['stock', 'debts'], queryFn: () => http.get<Debt[]>('/api/stock/supplier-debts') });
+  const { branch } = useOrg();
+  const q = useQuery({ queryKey: ['stock', 'debts', branch.id], queryFn: () => http.get<Debt[]>(`/api/stock/supplier-debts?branch_id=${branch.id}`) });
   if (q.isLoading) return <PageLoader />;
   const d = q.data ?? [];
   return (

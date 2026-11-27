@@ -151,10 +151,15 @@ export async function warehouseRoutes(app: FastifyInstance) {
         group by 1, 2, 3, 4, 5 order by cost desc`, [m.org_id, m.branch_ids, req.query.from, req.query.to, uuidOrNull(req.query.branch_id)]));
   });
 
-  app.get('/api/stock/supplier-debts', async (req) => {
+  // branch_id berilsa — faqat shu filial (ombor kirimlari va shu filial kassasidan to'lovlar).
+  app.get<{ Querystring: { branch_id?: string } }>('/api/stock/supplier-debts', async (req) => {
     const m = requireMember(req);
     if (!can(m, 'warehouse.view') && !can(m, 'cashbox.view')) throw forbidden();
-    return tx(m.user_id, (c) => many(c, 'select * from supplier_debts where org_id = $1 order by purchased - paid desc', [m.org_id]));
+    const br = uuidOrNull(req.query.branch_id);
+    if (br && !m.branch_ids.includes(br)) throw forbidden();
+    return tx(m.user_id, (c) => br
+      ? many(c, 'select * from supplier_debts_branch($1, $2) order by purchased - paid desc', [m.org_id, br])
+      : many(c, 'select * from supplier_debts where org_id = $1 order by purchased - paid desc', [m.org_id]));
   });
 
   app.get<{ Querystring: { branch_id?: string } }>('/api/stock/low', async (req) => {

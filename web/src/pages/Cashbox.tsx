@@ -612,7 +612,7 @@ function Parties() {
 
 /** Kontragentlar: jadval (saralash, filtr) va kontragent sahifasi (hisoblar va to'lovlar). */
 function AllParties({ onTech }: { onTech: (id: string) => void }) {
-  const { can } = useOrg();
+  const { can, branch } = useOrg();
   const [type, setType] = useState('');
   const [f, setF] = useState({ name: '', phone: '', email: '', web: '', note: '' });
   const [arch, setArch] = useState(false);
@@ -620,11 +620,12 @@ function AllParties({ onTech }: { onTech: (id: string) => void }) {
   const [prof, setProf] = useState<string | null>(null);
   const [sort, setSort] = useState<{ k: string; dir: 1 | -1 }>({ k: 'name', dir: 1 });
   const cps = useList<Counterparty>('counterparties', { type: type || undefined, archived: arch });
-  const inv = useList<Invoice>('counterparty_invoices');
-  const pays = useList<MoneyMove>('money_moves', { kind: 'expense', 'counterparty_id.not': null }, { limit: 5000 });
-  const debts = useQuery({ queryKey: ['stock', 'debts'], queryFn: () => http.get<Debt[]>('/api/stock/supplier-debts') });
+  // Kontragentlar ikkala filialda umumiy, summalar esa faqat joriy filial bo'yicha.
+  const inv = useList<Invoice>('counterparty_invoices', { branch_id: branch.id });
+  const pays = useList<MoneyMove>('money_moves', { branch_id: branch.id, kind: 'expense', 'counterparty_id.not': null }, { limit: 5000 });
+  const debts = useQuery({ queryKey: ['stock', 'debts', branch.id], queryFn: () => http.get<Debt[]>(`/api/stock/supplier-debts?branch_id=${branch.id}`) });
   // Texnik: bemorlar to'lagan sari hisoblangan laboratoriya ulushi ham "bajarilgan"ga kiradi.
-  const techs = useQuery({ queryKey: ['lab', 'technicians'], queryFn: () => http.get<TechRow[]>('/api/lab/technicians') });
+  const techs = useQuery({ queryKey: ['lab', 'technicians', branch.id], queryFn: () => http.get<TechRow[]>(`/api/lab/technicians?branch_id=${branch.id}`) });
   const doneOf = (id: string) => (inv.data ?? []).filter((x) => x.counterparty_id === id).reduce((a, x) => a + x.amount, 0) + (debts.data?.find((d) => d.counterparty_id === id)?.purchased ?? 0)
     + (techs.data?.find((t) => t.id === id)?.earned ?? 0);
   const paidOf = (id: string) => (pays.data ?? []).filter((x) => x.counterparty_id === id).reduce((a, x) => a + x.amount, 0);
@@ -646,7 +647,7 @@ function AllParties({ onTech }: { onTech: (id: string) => void }) {
       <div className="flex flex-wrap items-center gap-3">
         {can('cashbox.edit') && <button type="button" onClick={() => setOpen('new')} className="inline-flex h-9 items-center gap-1.5 rounded-[3px] bg-primary px-3.5 text-sm text-white"><Plus size={15} /> Kontragent qo‘shish</button>}
         <label className="flex items-center gap-1.5 text-sm text-sub"><input type="checkbox" checked={arch} onChange={(e) => setArch(e.target.checked)} /> Arxiv</label>
-        <span className="ml-auto text-sm text-sub">Ko‘rsatilganlar balansi: <b className={tot < 0 ? 'text-bad' : 'text-fg'}>{money(tot)}</b></span>
+        <span className="ml-auto text-sm text-sub">{branch.name} bo‘yicha · Ko‘rsatilganlar balansi: <b className={tot < 0 ? 'text-bad' : 'text-fg'}>{money(tot)}</b></span>
       </div>
       <Card className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
@@ -697,9 +698,12 @@ function AllParties({ onTech }: { onTech: (id: string) => void }) {
 function PartyProfile({ cp, invoices, payments, purchased, onBack, onEdit, editOpen, onCloseEdit }: {
   cp: Counterparty; invoices: Invoice[]; payments: MoneyMove[]; purchased: number; onBack: () => void; onEdit: () => void; editOpen: Counterparty | 'new' | null; onCloseEdit: () => void;
 }) {
-  const { can, branch } = useOrg();
+  const { can, branch, branches } = useOrg();
   const boxes = useList<Box>('cashboxes', { branch_id: branch.id, archived: false });
   const allBoxes = useList<Box>('cashboxes');
+  const others = branches.filter((b) => b.id !== branch.id && can('cashbox.edit', b.id));
+  const moveInv = useAction(({ id, to }: { id: string; to: string }) => db.update('counterparty_invoices', id, { branch_id: to }),
+    { invalidate: ['counterparty_invoices'], success: 'Hisob boshqa filialga o‘tkazildi' });
   const bm = byId(allBoxes.data);
   const [md, setMd] = useState<{ kind: 'inv' | 'pay'; id?: string; date: string; desc: string; amt: string; box: string } | null>(null);
   const invTot = invoices.reduce((a, x) => a + x.amount, 0) + purchased;
@@ -707,7 +711,7 @@ function PartyProfile({ cp, invoices, payments, purchased, onBack, onEdit, editO
   const save = useAction(() => {
     const m = md!; const amount = Math.round(Number(m.amt) || 0);
     if (amount <= 0) throw new Error('Summani kiriting');
-    if (m.kind === 'inv') return m.id ? db.update('counterparty_invoices', m.id, { inv_date: m.date, description: m.desc, amount }) : db.insert('counterparty_invoices', { counterparty_id: cp.id, inv_date: m.date, description: m.desc, amount });
+    if (m.kind === 'inv') return m.id ? db.update('counterparty_invoices', m.id, { inv_date: m.date, description: m.desc, amount }) : db.insert('counterparty_invoices', { branch_id: branch.id, counterparty_id: cp.id, inv_date: m.date, description: m.desc, amount });
     return db.insert('money_moves', { kind: 'expense', cashbox_id: m.box || boxes.data?.[0]?.id, amount, counterparty_id: cp.id, note: m.desc, moved_at: new Date(m.date + 'T12:00:00').toISOString() });
   }, { invalidate: ['counterparty_invoices', 'money_moves', 'cash', 'stock'], success: 'Saqlandi', onDone: () => setMd(null) });
   const delInv = useAction((id: string) => db.remove('counterparty_invoices', id), { invalidate: ['counterparty_invoices'] });
@@ -741,7 +745,16 @@ function PartyProfile({ cp, invoices, payments, purchased, onBack, onEdit, editO
           {purchased > 0 && <div className="grid grid-cols-[100px_1fr_120px_32px] gap-2 border-b border-line px-3 py-2 text-sm"><span className="text-sub">—</span><span>Ombor kirimlari (nakladnoylar)</span><span className="text-right">{money(purchased)}</span><span /></div>}
           {invoices.map((x) => (
             <div key={x.id} className="grid grid-cols-[100px_1fr_120px_32px] items-center gap-2 border-b border-line px-3 py-2 text-sm last:border-b-0">
-              <span className="text-sub">{dmy(x.inv_date)}</span><span>{x.description || '—'}</span><span className="text-right">{money(x.amount)}</span>
+              <span className="text-sub">{dmy(x.inv_date)}</span>
+              <span className="flex min-w-0 flex-wrap items-center gap-2">{x.description || '—'}
+                {edit && others.length > 0 && (
+                  <select aria-label="Hisobni boshqa filialga o‘tkazish" title="Boshqa filialga o‘tkazish" value="" disabled={moveInv.isPending}
+                    onChange={(e) => e.target.value && moveInv.mutate({ id: x.id, to: e.target.value })}
+                    className="h-6 max-w-[150px] rounded border border-line bg-white px-1 text-[11px] text-sub">
+                    <option value="">⇄ boshqa filialga</option>{others.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                )}
+              </span><span className="text-right">{money(x.amount)}</span>
               {edit ? <button type="button" onClick={() => delInv.mutate(x.id)} aria-label="Hisobni o‘chirish" className="text-faint hover:text-bad"><Trash2 size={14} /></button> : <span />}
             </div>
           ))}
