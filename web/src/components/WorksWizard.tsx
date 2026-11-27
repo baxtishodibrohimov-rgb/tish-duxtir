@@ -223,17 +223,37 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
   if (cat) { if (cat.ask_teeth) crumbs.push([tooth ? `Tish: ${tooth}` : 'Tish formulasi', 'teeth']); crumbs.push([cat.name, 'works']); }
   if (work) crumbs.push([work.name, 'mats']);
   if (step === 'sum') crumbs.push(['Yakun', 'sum']);
-  const BTN = 'inline-flex h-11 items-center gap-1.5 rounded-lg px-[18px] text-[15px]';
+  const IBTN = 'grid h-10 w-10 flex-none place-items-center rounded-lg';
+  const flow = !cat_.isLoading && !done;
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Material xarajat" className="fixed inset-0 z-[2000] flex flex-col bg-surface text-fg">
-      <div className="flex items-center gap-3 border-b border-line bg-white px-4 py-3 sm:px-6">
-        <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[#e6f6fc] text-primary-hover"><CatIconSvg icon="tooth" size={20} /></span>
+      {/* Ixcham sarlavha: ← | ikonka | nomi + bemor (1-qator), qadamlar (2-qator) | → | × */}
+      <div className="flex items-center gap-2 border-b border-line bg-white px-3 py-1.5 sm:gap-3 sm:px-4">
+        {flow && step !== 'cats' && <button type="button" onClick={back} aria-label="Orqaga" title="Orqaga" className={cx(IBTN, 'border border-line bg-white text-fg hover:bg-muted')}><ChevronLeft size={22} /></button>}
+        <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-[#e6f6fc] text-primary-hover"><CatIconSvg icon="tooth" size={20} /></span>
         <div className="flex min-w-0 flex-1 flex-col">
-          <h2 className="m-0 text-lg font-semibold">Material xarajat</h2>
-          <span className="truncate text-[13px] text-sub">{patient.full_name}{patient.card_number && ` · №${patient.card_number}`} · {memberName(visit?.doctor_id ?? me.user_id)} · {dmy(visit?.starts_at ?? new Date().toISOString())}</span>
+          <div className="truncate leading-tight">
+            <h2 className="m-0 inline text-base font-semibold">Material xarajat</h2>
+            <span className="text-[13px] text-sub"> · {patient.full_name}{patient.card_number && ` · №${patient.card_number}`} · {memberName(visit?.doctor_id ?? me.user_id)} · {dmy(visit?.starts_at ?? new Date().toISOString())}</span>
+          </div>
+          {flow && (
+            <nav aria-label="Qadamlar" className="flex min-w-0 items-center gap-0.5 overflow-x-auto whitespace-nowrap">
+              {crumbs.map(([l, sp], i) => (
+                <span key={i} className="flex flex-none items-center gap-0.5">
+                  {i > 0 && <span aria-hidden="true" className="text-faint">›</span>}
+                  <button type="button" onClick={() => sp && setStep(sp)} className={cx('max-w-[240px] truncate rounded px-1 py-0.5 text-[13px]', sp === step ? 'font-semibold text-fg' : 'text-primary-hover')}>{l}</button>
+                </span>
+              ))}
+            </nav>
+          )}
         </div>
-        <button type="button" onClick={onClose} aria-label="Yopish" className="grid h-10 w-10 place-items-center rounded-lg text-sub hover:bg-muted"><X size={22} /></button>
+        {flow && step === 'teeth' && <button type="button" disabled={!teeth.size} onClick={next} aria-label="Davom etish" title="Davom etish" className={cx(IBTN, 'w-14 bg-primary text-white disabled:opacity-50')}><ChevronRight size={24} /></button>}
+        {flow && step === 'mats' && (groups.length && gi < groups.length - 1
+          ? <button type="button" onClick={() => goGroup(1)} aria-label="Keyingi guruh" title="Keyingi guruh" className={cx(IBTN, 'w-14 bg-primary text-white')}><ChevronRight size={24} /></button>
+          : <button type="button" onClick={() => setStep('sum')} aria-label="Yakunlash" title="Yakunlash" className={cx(IBTN, 'w-14 bg-primary text-white')}><ChevronRight size={24} /></button>)}
+        {flow && step === 'sum' && <button type="button" disabled={accept.isPending} onClick={() => accept.mutate(undefined)} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-ok px-4 text-[15px] font-semibold text-white disabled:opacity-60"><Check size={18} /> Tasdiqlash</button>}
+        <button type="button" onClick={onClose} aria-label="Yopish" title="Yopish" className={cx(IBTN, 'text-sub hover:bg-muted')}><X size={22} /></button>
       </div>
 
       {cat_.isLoading ? <PageLoader /> : done ? (
@@ -261,16 +281,7 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
           </div>
         </div>
       ) : <>
-        <nav aria-label="Qadamlar" className="flex flex-wrap items-center gap-1 border-b border-line bg-white px-4 py-2 sm:px-6">
-          {crumbs.map(([l, s], i) => (
-            <span key={i} className="flex items-center gap-1">
-              {i > 0 && <span aria-hidden="true" className="text-faint">›</span>}
-              <button type="button" onClick={() => s && setStep(s)} className={cx('max-w-[260px] truncate rounded-md px-2 py-1.5 text-[15px]', s === step ? 'font-semibold text-fg' : 'text-primary-hover')}>{l}</button>
-            </span>
-          ))}
-        </nav>
-
-        <div className="min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-6">
+        <div className="min-h-0 flex-1 overflow-auto px-4 pt-3 pb-5 sm:px-6">
           {step === 'cats' && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] sm:gap-4">
               {(c?.cats ?? []).map((k, i) => {
@@ -364,19 +375,19 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                 Bu ishga material biriktirilmagan. Sozlamalar → Bajarilgan ish bo‘limida qo‘shish mumkin.<br />Materialsiz saqlash uchun «Yakunlash»ni bosing.
               </div>
             ) : grp && (
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-col gap-3">
+                <div className="sticky -top-3 z-10 -mx-4 -mt-3 flex flex-wrap items-center gap-1.5 bg-surface px-4 py-2 sm:-mx-6 sm:px-6">
                   {groups.map((g, i) => {
                     const n = g.cards.filter((x) => (used[x.product_id] ?? 0) > 0).length;
                     return (
                       <button key={g.id} type="button" onClick={() => setGi(i)}
-                        className={cx('inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-sm', i === gi ? 'bg-primary font-semibold text-white' : n ? 'bg-[#e6f6fc] text-[#075985]' : 'bg-white text-sub ring-1 ring-line')}>
+                        className={cx('inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px]', i === gi ? 'bg-primary font-semibold text-white' : n ? 'bg-[#e6f6fc] text-[#075985]' : 'bg-white text-sub ring-1 ring-line')}>
                         <span className="tabular-nums">{i + 1}.</span> {g.name}{n > 0 && <span className={cx('rounded-full px-1.5 text-xs', i === gi ? 'bg-white/25' : 'bg-white')}>{n}</span>}
                       </button>
                     );
                   })}
                 </div>
-                <h3 className="m-0 text-xl font-semibold">{grp.name} <span className="text-base font-normal text-sub">· guruh {gi + 1}/{groups.length}</span>
+                <h3 className="m-0 text-lg font-semibold">{grp.name} <span className="text-sm font-normal text-sub">· guruh {gi + 1}/{groups.length}{chosen.length > 0 && ` · jami ${chosen.length} ta material`}</span>
                   <span className="ml-2 text-xs font-normal text-faint">kartani ↑ surish +, ↓ surish −; ekranni ← keyingi, → oldingi guruh<span className="[@media(pointer:coarse)]:hidden"> · klaviaturada ← →</span></span></h3>
                 <div key={`${gi}`} {...swipe({ onLeft: () => goGroup(1), onRight: () => goGroup(-1) })} style={{ touchAction: 'pan-y' }}
                   className={cx('grid min-h-[50vh] grid-cols-2 content-start gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4', slide === 'r' ? 'td-in-r' : 'td-in-l')}>
@@ -446,16 +457,6 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-line bg-white px-4 py-3 sm:px-6">
-          {step !== 'cats' && <button type="button" onClick={back} className={cx(BTN, 'border border-line bg-white')}><ChevronLeft size={18} /> Orqaga</button>}
-          <span className="flex-1 text-sm text-sub"><span className="hidden sm:inline">{work ? `${work.name} · ${chosen.length} ta material` : ''}</span></span>
-          <button type="button" onClick={onClose} className={cx(BTN, 'border border-line bg-white')}>Bekor qilish</button>
-          {step === 'teeth' && <button type="button" disabled={!teeth.size} onClick={next} className={cx(BTN, 'bg-primary font-semibold text-white disabled:opacity-50')}>Davom etish <ChevronRight size={18} /></button>}
-          {step === 'mats' && (groups.length && gi < groups.length - 1
-            ? <button type="button" onClick={() => goGroup(1)} className={cx(BTN, 'bg-primary font-semibold text-white')}>Keyingi guruh <ChevronRight size={18} /></button>
-            : <button type="button" onClick={() => setStep('sum')} className={cx(BTN, 'bg-primary font-semibold text-white')}>Yakunlash <ChevronRight size={18} /></button>)}
-          {step === 'sum' && <button type="button" disabled={accept.isPending} onClick={() => accept.mutate(undefined)} className={cx(BTN, 'bg-ok font-semibold text-white disabled:opacity-60')}><Check size={18} /> Tasdiqlash</button>}
-        </div>
       </>}
     </div>
   );
