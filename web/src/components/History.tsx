@@ -4,7 +4,7 @@ import { Camera, ChevronLeft, ChevronRight, FolderPlus, Pencil, Plus, Search, Se
 import { useOrg } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
-import { dmyhm, fold, initials, money, qty as fq } from '@/lib/format';
+import { dmy, dmyhm, fold, initials, money, qty as fq } from '@/lib/format';
 import type { Patient } from '@/lib/types';
 import { CatIconSvg, WorksWizard } from './WorksWizard';
 import { Confirm, cx } from './ui';
@@ -21,6 +21,7 @@ interface WorkDetails {
   kind: 'works'; category: string | null; works: { name: string; price: number; qty?: number }[]; total: number; tooth: string | null;
   gross?: number; discount?: number; discount_pct?: number | null;
   groups: { name: string; items: { name: string; qty: number; unit: string }[] }[];
+  lab?: { numbers: number[]; shade: string; impression: 'scan' | 'cast'; due_date: string; technician: string | null; responsible: string | null } | null;
 }
 
 const STICKERS = ['🦷', '👍', '👌', '✅', '❗', '⚠️', '⭐', '❤️', '😊', '😁', '😬', '😢', '😷', '🔥', '💉', '🩺', '💊', '🩹', '📌', '📞', '🕐', '💰', '🎉', '🙏'];
@@ -262,6 +263,16 @@ function WorksBlock({ r }: { r: HRecord }) {
           </div>
         )}
         {d.groups.length === 0 && <span className="text-xs text-sub">Material ishlatilmagan</span>}
+        {d.lab && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-[#e9d5ff] bg-[#faf5ff] px-3 py-2 text-sm text-[#3d4858]">
+            <b className="font-semibold text-[#6d28d9]">🧪 Laboratoriya №{d.lab.numbers.join(', №')}</b>
+            {d.lab.technician && <span>Texnik: <b className="font-medium text-fg">{d.lab.technician}</b></span>}
+            {d.lab.responsible && <span>Ma’sul: <b className="font-medium text-fg">{d.lab.responsible}</b></span>}
+            <span>Rang: <b className="font-medium text-fg">{d.lab.shade}</b></span>
+            <span>{d.lab.impression === 'scan' ? 'Skaner' : 'Oddiy qolip'}</span>
+            <span>Muddat: <b className="font-medium text-fg">{dmy(d.lab.due_date)}</b></span>
+          </div>
+        )}
       </div>
     </div>
   );

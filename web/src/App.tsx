@@ -13,6 +13,7 @@ import { Cashbox } from './pages/Cashbox';
 import { Warehouse } from './pages/warehouse/Warehouse';
 import { Reports, ReportPage } from './pages/Reports';
 import { Settings } from './pages/Settings';
+import { Lab } from './pages/Lab';
 import type { Perm } from './lib/types';
 
 const ROUTES: { path: string; perm: Perm | null; render: (p: Record<string, string>) => ReactNode }[] = [
@@ -22,6 +23,7 @@ const ROUTES: { path: string; perm: Perm | null; render: (p: Record<string, stri
   { path: '/patients/:id', perm: 'patients.view', render: (p) => <PatientCard id={p.id!} /> },
   { path: '/cashbox', perm: 'cashbox.view', render: () => <Cashbox /> },
   { path: '/warehouse', perm: 'warehouse.view', render: () => <Warehouse /> },
+  { path: '/lab', perm: 'patients.view', render: () => <Lab /> },
   { path: '/reports', perm: 'reports.view', render: () => <Reports /> },
   { path: '/reports/:slug', perm: 'reports.view', render: (p) => <ReportPage slug={p.slug!} /> },
   { path: '/ai', perm: null, render: () => <Assistant /> },

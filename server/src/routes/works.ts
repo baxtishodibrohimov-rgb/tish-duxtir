@@ -16,6 +16,15 @@ const Body = z.object({
   discount_pct: z.number().min(0).max(100).nullable().optional(), // foizda berilgan bo'lsa (ko'rsatish uchun)
   materials: z.array(z.object({ product_id: z.string().uuid(), qty: z.number().positive().max(100000), group: z.string().max(120).nullable().optional() })).max(200),
   warehouse_id: z.string().uuid().nullable().optional(),
+  // Laboratoriya ishi bo'lsa — buyurtma ma'lumotlari (texnik, ma'sul shifokor, rang, qolip, muddat).
+  lab: z.object({
+    technician_id: z.string().uuid({ message: 'Texnikni tanlang' }),
+    responsible_id: z.string().uuid({ message: 'Ma’sul shaxsni tanlang' }),
+    shade: z.string().trim().min(1, 'Tish rangini tanlang').max(20),
+    impression: z.enum(['scan', 'cast'], { message: 'Qolip turini tanlang' }),
+    due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Muddatni kiriting'),
+    note: z.string().max(1000).nullable().optional(),
+  }).nullable().optional(),
 });
 type WorkBody = z.infer<typeof Body>;
 interface Ctx { org_id: string; branch_id: string; patient_id: string; visit_id: string | null; doctor_id: string | null; date: string | Date }
@@ -25,8 +34,16 @@ interface Ctx { org_id: string; branch_id: string; patient_id: string; visit_id:
  * (kalkulyatsiya kartasi emas — shifokor belgilagan son).
  */
 async function recordWorks(c: Db, m: MemberCtx, x: Ctx, b: WorkBody) {
-  const items = await many<any>(c, 'select id, name, price from price_items where org_id = $1 and id = any($2)', [m.org_id, b.items]);
+  const items = await many<any>(c, 'select id, name, price, is_lab, tech_price from price_items where org_id = $1 and id = any($2)', [m.org_id, b.items]);
   if (items.length !== new Set(b.items).size) throw bad('Ish praysda topilmadi');
+  const labItems = items.filter((it) => it.is_lab);
+  if (labItems.length && !b.lab) throw bad('Laboratoriya ma’lumotlarini kiriting');
+  if (b.lab && labItems.length) {
+    const t = await one<any>(c, `select 1 from counterparties where id = $1 and org_id = $2 and type = 'technician' and not archived`, [b.lab.technician_id, m.org_id]);
+    if (!t) throw bad('Texnik topilmadi');
+    const r = await one<any>(c, `select 1 from members where user_id = $1 and org_id = $2 and is_active`, [b.lab.responsible_id, m.org_id]);
+    if (!r) throw bad('Ma’sul shaxs topilmadi');
+  }
 
   const wh = b.warehouse_id
     ? await one<any>(c, 'select id, branch_id from warehouses where id = $1 and org_id = $2 and not archived', [b.warehouse_id, m.org_id])
@@ -45,6 +62,19 @@ async function recordWorks(c: Db, m: MemberCtx, x: Ctx, b: WorkBody) {
   for (const id of b.items) {
     const it = items.find((r) => r.id === id)!;
     await c.query('insert into act_items (act_id, price_item_id, name, tooth, qty, price) values ($1, $2, $3, $4, $5, $6)', [act.id, it.id, it.name, tooth, qty, it.price]);
+  }
+  // Laboratoriya buyurtmasi: har bir lab ishi uchun bittadan; texnik narxi × tishlar soni.
+  const labOrders: { id: string; number: number }[] = [];
+  if (b.lab) {
+    for (const it of labItems) {
+      const o = await one<any>(c, `insert into lab_orders (org_id, branch_id, patient_id, act_id, price_item_id, work_name, tooth, qty, technician_id,
+                                     responsible_id, doctor_id, shade, impression, due_date, tech_amount, note, created_by)
+                                   values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) returning id, number`,
+        [m.org_id, x.branch_id, x.patient_id, act.id, it.id, it.name, tooth, qty, b.lab.technician_id, b.lab.responsible_id, x.doctor_id,
+          b.lab.shade, b.lab.impression, b.lab.due_date, Number(it.tech_price) * qty, b.lab.note?.trim() || null, m.user_id]);
+      await c.query(`insert into lab_order_events (org_id, order_id, status, action, by_user) values ($1, $2, 'to_send', 'created', $3)`, [m.org_id, o.id, m.user_id]);
+      labOrders.push(o);
+    }
   }
   // Akt yopiladi. close_act() kalkulyatsiya kartasi bo'yicha chiqaradi — bu yerda esa shifokor belgilagan miqdor.
   await c.query(`update acts set status = 'closed' where id = $1`, [act.id]);
@@ -84,9 +114,14 @@ async function recordWorks(c: Db, m: MemberCtx, x: Ctx, b: WorkBody) {
     kind: 'works', category: info[0]?.cat ?? null, works: info.map((x) => ({ name: x.name, price: Number(x.price), qty })),
     gross, discount, discount_pct: b.discount_pct ?? null, total: gross - discount, tooth,
     groups: [...groups.entries()].map(([name, items]) => ({ name, items })),
+    lab: b.lab && labOrders.length ? {
+      numbers: labOrders.map((o) => o.number), shade: b.lab.shade, impression: b.lab.impression, due_date: b.lab.due_date,
+      technician: (await one<any>(c, 'select name from counterparties where id = $1', [b.lab.technician_id]))?.name ?? null,
+      responsible: (await one<any>(c, 'select full_name from members where user_id = $1 and org_id = $2', [b.lab.responsible_id, m.org_id]))?.full_name ?? null,
+    } : null,
   };
   await c.query('update treatment_records set details = $2 where act_id = $1', [act.id, JSON.stringify(details)]);
-  return { act_id: act.id, stock_doc_id: doc, left };
+  return { act_id: act.id, stock_doc_id: doc, left, lab_orders: labOrders };
 }
 
 export async function workRoutes(app: FastifyInstance) {
@@ -125,7 +160,7 @@ export async function workRoutes(app: FastifyInstance) {
       const wh = await one<any>(c, 'select id from warehouses where branch_id = $1 and org_id = $2 and is_main and not archived', [br, m.org_id]);
       const [cats, items, groups, cards, products] = await Promise.all([
         many(c, 'select id, name, icon, ask_teeth, position from price_categories where org_id = $1 order by position, name', [m.org_id]),
-        many(c, 'select id, category_id, name, price, position from price_items where org_id = $1 and not archived order by position, name', [m.org_id]),
+        many(c, 'select id, category_id, name, price, position, is_lab, tech_price from price_items where org_id = $1 and not archived order by position, name', [m.org_id]),
         many(c, 'select id, price_item_id, name, position from work_mat_groups where org_id = $1 order by position, name', [m.org_id]),
         many(c, 'select price_item_id, product_id, qty, group_id, position from calc_cards where org_id = $1 order by position', [m.org_id]),
         many(c, `select p.id, p.name, p.unit, p.image_path is not null as has_image, p.image_path, b.name brand,
@@ -133,7 +168,8 @@ export async function workRoutes(app: FastifyInstance) {
                    from products p left join brands b on b.id = p.brand_id
                   where p.org_id = $1 and not p.archived and p.id in (select product_id from calc_cards where org_id = $1)`, [m.org_id, wh?.id ?? null]),
       ]);
-      return { warehouse_id: wh?.id ?? null, cats, items, groups, cards, products };
+      const technicians = await many(c, `select id, name, phone from counterparties where org_id = $1 and type = 'technician' and not archived order by name`, [m.org_id]);
+      return { warehouse_id: wh?.id ?? null, cats, items, groups, cards, products, technicians };
     });
   });
 

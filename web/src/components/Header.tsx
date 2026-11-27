@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell, X, ChevronDown, Plus, Pencil } from 'lucide-react';
+import { CalendarDays, Users, Wallet, Package, ChartColumn, Settings, Building2, Check, User, LogOut, UserPlus, Clock3, Bell, X, ChevronDown, Plus, Pencil, FlaskConical } from 'lucide-react';
 import { Link, navigate, useLocation } from '@/lib/router';
 import { useAuth, ROLE_LABEL } from '@/lib/auth';
-import { db } from '@/lib/api';
+import { useQuery } from '@tanstack/react-query';
+import { db, http } from '@/lib/api';
+import { daysLeftText, type LabAlert } from '@/lib/lab';
 import { useAction, useList } from '@/lib/hooks';
 import { addDays, hm, initials, isoDate, dmy } from '@/lib/format';
 import { cx } from './ui';
@@ -13,6 +15,7 @@ const NAV: { label: string; to: string; icon: typeof Users; perm: Perm | null }[
   { label: 'Bemorlar', to: '/patients', icon: Users, perm: 'patients.view' },
   { label: 'Kassa', to: '/cashbox', icon: Wallet, perm: 'cashbox.view' },
   { label: 'Ombor', to: '/warehouse', icon: Package, perm: 'warehouse.view' },
+  { label: 'Laboratoriya', to: '/lab', icon: FlaskConical, perm: 'patients.view' },
   { label: 'Hisobotlar', to: '/reports', icon: ChartColumn, perm: 'reports.view' },
   { label: 'Sozlamalar', to: '/settings', icon: Settings, perm: null },
 ];
@@ -192,7 +195,7 @@ export function Header() {
     </header>
   );
 }
-const SHORT: Record<string, string> = { Hisobotlar: 'Hisobot', Sozlamalar: 'Sozlama' };
+const SHORT: Record<string, string> = { Hisobotlar: 'Hisobot', Sozlamalar: 'Sozlama', Laboratoriya: 'Lab' };
 
 /** Kutish navbati: bo'sh vaqt chiqsa, shu yerdan qabulga yoziladi. */
 function Queue({ open, onToggle, onClose }: { open: boolean; onToggle: () => void; onClose: () => void }) {
@@ -244,9 +247,23 @@ function Queue({ open, onToggle, onClose }: { open: boolean; onToggle: () => voi
   );
 }
 
-/** Eslatmalar: bugungi va o'tib ketganlar. */
+const LAB_ALERT: Record<LabAlert['kind'], { dot: string; btn: string; text: (a: LabAlert) => string }> = {
+  send: { dot: '#d97706', btn: 'Jo‘natdim', text: (a) => `qolipni ${a.technician_name}ga jo‘nating` },
+  soon: { dot: '#0086b8', btn: 'Xabar oldim', text: (a) => `muddat: ${daysLeftText(a.due_date)} — texnikdan xabar oling` },
+  overdue: { dot: '#dc2626', btn: 'Xabar oldim', text: (a) => `muddat ${daysLeftText(a.due_date)}! Texnikdan xabar oling` },
+  ready: { dot: '#16a34a', btn: 'Topshirildi', text: () => 'ish tayyor — bemorni chaqiring' },
+};
+
+/** Eslatmalar: bugungi va o'tib ketganlar (+ laboratoriya xabarlari). */
 function Reminders({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const { me, can } = useAuth();
+  const { me, can, branch } = useAuth();
+  // Laboratoriya xabarlari: filialdagi hamma ko'radi, tugmani faqat ma'sul shaxs bosadi. Har daqiqada yangilanadi.
+  const labQ = useQuery({ queryKey: ['lab', 'alerts', branch?.id], enabled: !!branch && can('patients.view'), refetchInterval: 60_000,
+    queryFn: () => http.get<LabAlert[]>(`/api/lab/alerts?branch_id=${branch!.id}`) });
+  const alerts = labQ.data ?? [];
+  const labAct = useAction((a: LabAlert) => a.kind === 'send' ? http.patch(`/api/lab/orders/${a.id}`, { status: 'at_lab' })
+    : a.kind === 'ready' ? http.patch(`/api/lab/orders/${a.id}`, { status: 'delivered' }) : http.post(`/api/lab/orders/${a.id}/checked`, {}),
+    { invalidate: ['lab'], success: 'Belgilandi' });
   const tomorrow = isoDate(addDays(new Date(), 1));
   const list = useList<Reminder>('reminders', { 'remind_at.lt': new Date(tomorrow + 'T00:00:00').toISOString(), 'status.in': ['planned', 'done'] }, { order: 'remind_at' });
   const [text, setText] = useState('');
@@ -265,11 +282,31 @@ function Reminders({ open, onToggle }: { open: boolean; onToggle: () => void }) 
       <button type="button" onClick={onToggle} aria-haspopup="dialog" aria-expanded={open} aria-label="Eslatmalar" title="Eslatmalar"
         className={cx('relative grid h-10 w-10 md:h-[30px] md:w-[30px] place-items-center rounded-full text-sub hover:bg-muted hover:text-fg', open && 'bg-muted text-fg')}>
         <Bell size={18} />
-        <Count n={open_} tone="bg-bad" />
+        <Count n={open_ + alerts.length} tone="bg-bad" />
       </button>
       {open && (
         <div role="dialog" aria-label="Eslatmalar" className={POP}>
-          <div className="flex items-center justify-between gap-3"><b className="text-sm font-semibold">Eslatmalar</b><span className="text-xs text-sub">Bugun va o‘tib ketganlar</span></div>
+          {alerts.length > 0 && <div className="flex items-center justify-between gap-3"><b className="text-sm font-semibold">🧪 Laboratoriya</b><Link to="/lab" onClick={onToggle} className="text-xs">Hammasi</Link></div>}
+          {alerts.length > 0 && (
+            <div className="flex max-h-[45vh] flex-col overflow-y-auto">
+              {alerts.map((a) => {
+                const t = LAB_ALERT[a.kind];
+                return (
+                  <div key={a.id + a.kind} className={cx('flex items-start gap-2 border-t border-muted py-2', a.kind === 'overdue' && 'bg-[#fff5f5]')}>
+                    <span className="mt-1 h-2 w-2 flex-none rounded-full" style={{ background: t.dot }} />
+                    <Link to={`/lab?order=${a.id}`} onClick={onToggle} className="flex min-w-0 flex-1 flex-col gap-px !text-fg no-underline">
+                      <span className="text-sm"><b className="font-semibold">{a.patient_name}</b>: {t.text(a)}</span>
+                      <span className="text-xs text-sub">№{a.number} · {a.work_name}{a.tooth ? ` · ${a.tooth}` : ''} · {a.technician_name} · ma’sul: {a.responsible_name}</span>
+                    </Link>
+                    {a.can_drive
+                      ? <button type="button" disabled={labAct.isPending} onClick={() => labAct.mutate(a)} className="h-8 flex-none rounded-lg bg-primary px-2.5 text-[13px] font-medium whitespace-nowrap text-white">{t.btn}</button>
+                      : <span className="flex-none self-center text-[11px] text-faint">{t.btn.toLowerCase()} — ma’sul</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className={cx('flex items-center justify-between gap-3', alerts.length > 0 && 'border-t border-line pt-2')}><b className="text-sm font-semibold">Eslatmalar</b><span className="text-xs text-sub">Bugun va o‘tib ketganlar</span></div>
           {rows.map((r) => (
             <label key={r.id} className="flex items-start gap-2 border-t border-muted py-2">
               <input type="checkbox" aria-label="Bajarildi" checked={r.status === 'done'} disabled={!can('patients.edit')} onChange={() => toggle.mutate(r)} className="mt-[3px]" />

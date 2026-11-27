@@ -19,6 +19,7 @@ export async function clinicRoutes(app: FastifyInstance) {
       telegram_chat_id: z.string().max(40).nullable().optional(),
       logo_url: z.string().max(500).nullable().optional(),
       doctor_share_percent: z.number().min(0).max(100).optional(),
+      lab_warn_days: z.number().int().min(0).max(60).optional(),
     }).parse(req.body);
     return tx(m.user_id, async (c) => {
       const cols = Object.keys(b) as (keyof typeof b)[];

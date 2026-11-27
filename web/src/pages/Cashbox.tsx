@@ -10,7 +10,9 @@ import { useQueryParam, useTitle } from '@/lib/router';
 import type { Cashbox as Box, Counterparty, ExpenseCategory, MoneyMove, Patient } from '@/lib/types';
 import { CounterpartyForm, CP_TYPE } from '@/components/CounterpartyForm';
 import { PatientPicker } from '@/components/PatientPicker';
-import { Button, Card, Empty, Field, Input, Modal, PageLoader, Select, TD, TH, cx } from '@/components/ui';
+import { Button, Card, Empty, Field, Input, Modal, PageLoader, PillTabs, Select, TD, TH, cx } from '@/components/ui';
+import { TechList, TechProfile } from './Technicians';
+import type { TechRow } from '@/lib/lab';
 
 type Sub = 'boxes' | 'ops' | 'parties' | 'expenses';
 const SUBS: { key: Sub; label: string; icon: typeof Banknote }[] = [
@@ -582,8 +584,21 @@ function MoveModal({ kind, onClose }: { kind: MoneyMove['kind']; onClose: () => 
 interface Debt { counterparty_id: string; purchased: number; paid: number }
 interface Invoice { id: string; counterparty_id: string; inv_date: string; description: string; amount: number }
 
-/** Kontragentlar: jadval (saralash, filtr) va kontragent sahifasi (hisoblar va to'lovlar). */
+/** Kontragentlar: barchasi yoki texniklar (laboratoriya hisob-kitobi). */
 function Parties() {
+  const [mode, setMode] = useQueryParam<'all' | 'tech'>('cp', 'all');
+  const [tech, setTech] = useQueryParam<string>('tech', '');
+  if (tech) return <TechProfile id={tech} onBack={() => setTech('')} />;
+  return (
+    <div className="flex flex-col gap-3">
+      <PillTabs tabs={[{ key: 'all', label: 'Barcha kontragentlar' }, { key: 'tech', label: 'Texniklar' }]} value={mode} onChange={setMode} />
+      {mode === 'tech' ? <TechList onOpen={setTech} /> : <AllParties onTech={setTech} />}
+    </div>
+  );
+}
+
+/** Kontragentlar: jadval (saralash, filtr) va kontragent sahifasi (hisoblar va to'lovlar). */
+function AllParties({ onTech }: { onTech: (id: string) => void }) {
   const { can } = useOrg();
   const [type, setType] = useState('');
   const [f, setF] = useState({ name: '', phone: '', email: '', web: '', note: '' });
@@ -595,7 +610,10 @@ function Parties() {
   const inv = useList<Invoice>('counterparty_invoices');
   const pays = useList<MoneyMove>('money_moves', { kind: 'expense', 'counterparty_id.not': null }, { limit: 5000 });
   const debts = useQuery({ queryKey: ['stock', 'debts'], queryFn: () => http.get<Debt[]>('/api/stock/supplier-debts') });
-  const doneOf = (id: string) => (inv.data ?? []).filter((x) => x.counterparty_id === id).reduce((a, x) => a + x.amount, 0) + (debts.data?.find((d) => d.counterparty_id === id)?.purchased ?? 0);
+  // Texnik: bemorlar to'lagan sari hisoblangan laboratoriya ulushi ham "bajarilgan"ga kiradi.
+  const techs = useQuery({ queryKey: ['lab', 'technicians'], queryFn: () => http.get<TechRow[]>('/api/lab/technicians') });
+  const doneOf = (id: string) => (inv.data ?? []).filter((x) => x.counterparty_id === id).reduce((a, x) => a + x.amount, 0) + (debts.data?.find((d) => d.counterparty_id === id)?.purchased ?? 0)
+    + (techs.data?.find((t) => t.id === id)?.earned ?? 0);
   const paidOf = (id: string) => (pays.data ?? []).filter((x) => x.counterparty_id === id).reduce((a, x) => a + x.amount, 0);
   const has = (v: string | null | undefined, n: string) => !n || (v ?? '').toLowerCase().includes(n.toLowerCase());
   const rows = (cps.data ?? []).filter((c) => has(c.name, f.name) && has(c.phone, f.phone) && has(c.email, f.email) && has(c.website, f.web) && has(c.note, f.note))
@@ -639,7 +657,7 @@ function Parties() {
             {rows.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-sub">Filtr bo‘yicha kontragent topilmadi.</td></tr>}
             {rows.map(({ c, done, paid, bal }) => (
               <tr key={c.id} className="border-t border-line hover:bg-surface">
-                <td className="px-2.5 py-2"><button type="button" onClick={() => setProf(c.id)} title="Kontragent kartasini ochish" className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline"><UserRound size={14} />{c.name}</button></td>
+                <td className="px-2.5 py-2"><button type="button" onClick={() => (c.type === 'technician' ? onTech(c.id) : setProf(c.id))} title="Kontragent kartasini ochish" className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline"><UserRound size={14} />{c.name}</button></td>
                 <td className="px-2.5 py-2">{CP_TYPE[c.type]}</td>
                 <td className="px-2.5 py-2">{c.phone}</td>
                 <td className="px-2.5 py-2">{c.email}</td>

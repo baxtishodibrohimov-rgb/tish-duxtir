@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, X, Check, ChevronLeft, ChevronRight, Minus, Plus, Tag } from 'lucide-react';
+import { CheckCircle2, X, Check, ChevronLeft, ChevronRight, Minus, Plus, Tag, ScanLine, Hand, FlaskConical } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
 import { http } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
-import { dmy, money, qty as fq } from '@/lib/format';
+import { addDays, dmy, isoDate, money, qty as fq } from '@/lib/format';
+import { IMPRESSION, SHADES, daysLeftText, type Impression } from '@/lib/lab';
 import { Link } from '@/lib/router';
 import type { CatIcon, Patient, Visit } from '@/lib/types';
 import { ProductThumb } from './ProductThumb';
@@ -39,12 +40,15 @@ const ADULT = [[18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28],
 const CHILD = [[55, 54, 53, 52, 51, 61, 62, 63, 64, 65], [85, 84, 83, 82, 81, 71, 72, 73, 74, 75]];
 
 interface CatRow { id: string; name: string; icon: CatIcon; ask_teeth: boolean }
-interface ItemRow { id: string; category_id: string | null; name: string; price: number }
+interface ItemRow { id: string; category_id: string | null; name: string; price: number; is_lab: boolean; tech_price: number }
 interface GroupRow { id: string; price_item_id: string; name: string; position: number }
 interface CardRow { price_item_id: string; product_id: string; qty: number; group_id: string | null; position: number }
 interface ProdRow { id: string; name: string; unit: string; brand: string | null; image_path: string | null; qty: number }
-interface Catalog { warehouse_id: string | null; cats: CatRow[]; items: ItemRow[]; groups: GroupRow[]; cards: CardRow[]; products: ProdRow[] }
-type Step = 'cats' | 'teeth' | 'works' | 'mats' | 'sum';
+interface TechRow { id: string; name: string; phone: string | null }
+interface Catalog { warehouse_id: string | null; cats: CatRow[]; items: ItemRow[]; groups: GroupRow[]; cards: CardRow[]; products: ProdRow[]; technicians: TechRow[] }
+type Step = 'cats' | 'teeth' | 'works' | 'lab' | 'mats' | 'sum';
+interface LabForm { technician_id: string; responsible_id: string; shade: string; impression: Impression | ''; due_date: string; note: string }
+const DUE_QUICK = [5, 7, 10, 14];
 interface Disc { mode: 'sum' | 'pct'; val: string }
 const calcDisc = (d: Disc | undefined, gross: number) => {
   const v = Math.max(0, Number(d?.val) || 0);
@@ -91,7 +95,7 @@ function teethText(sel: Set<number>) {
  * Tasdiqlanganda akt yopiladi, materiallar ombordan chiqadi va bemor davolash tarixiga yoziladi.
  */
 export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Visit; patient: Patient; branchId: string; onClose: () => void }) {
-  const { memberName, me } = useOrg();
+  const { memberName, me, members } = useOrg();
   const cat_ = useQuery({ queryKey: ['works', 'catalog', branchId], queryFn: () => http.get<Catalog>(`/api/works/catalog?branch_id=${branchId}`) });
   const c = cat_.data;
   const pm = useMemo(() => new Map((c?.products ?? []).map((p) => [p.id, p])), [c]);
@@ -103,7 +107,10 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
   const [workId, setWorkId] = useState<string | null>(null);
   const [gi, setGi] = useState(0);
   const [used, setUsed] = useState<Record<string, number>>({});
-  const [done, setDone] = useState<{ work: string; tooth: string; mats: { name: string; q: number; unit: string; left: number }[] } | null>(null);
+  const [done, setDone] = useState<{ work: string; tooth: string; mats: { name: string; q: number; unit: string; left: number }[]; lab: number[] } | null>(null);
+  // Laboratoriya buyurtmasi (ish "lab ishi" bo'lsa): ma'sul — qabul shifokori, muddat — 7 kun.
+  const labInit = (): LabForm => ({ technician_id: '', responsible_id: visit?.doctor_id ?? (['doctor', 'owner'].includes(me.role) ? me.user_id : ''), shade: '', impression: '', due_date: isoDate(addDays(new Date(), 7)), note: '' });
+  const [lab, setLab] = useState<LabForm>(labInit);
 
   const cat = c?.cats.find((x) => x.id === catId);
   const works = (c?.items ?? []).filter((i) => i.category_id === catId);
@@ -132,6 +139,12 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
   const dv = Math.max(0, Number(disc.val) || 0);
   const discount = work ? discOf(work.id, Number(work.price)) : 0;
   const net = gross - discount;
+  const isLab = !!work?.is_lab;
+  const labOk = !isLab || (!!lab.technician_id && !!lab.responsible_id && !!lab.shade && !!lab.impression && !!lab.due_date);
+  const techAmount = work ? Number(work.tech_price) * nTeeth : 0;
+  const doctors = members.filter((x) => x.is_active && ['doctor', 'owner'].includes(x.role));
+  // Lab ma'lumotlari to'ldirilmagan bo'lsa — materiallar/yakunga o'tib bo'lmaydi.
+  const go = (sp: Step) => setStep(isLab && !labOk && (sp === 'mats' || sp === 'sum') ? 'lab' : sp);
   const setDisc = (wid: string, d: Disc) => setDiscs({ ...discs, [wid]: d });
   // Guruh almashganda suzish yo'nalishi va "+1/−1" yonib o'chishi
   const [slide, setSlide] = useState<'r' | 'l'>('r');
@@ -139,12 +152,13 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
 
   const setU = (pid: string, q: number) => { const u = { ...used }; if (q > 0) u[pid] = +q.toFixed(3); else delete u[pid]; setUsed(u); };
   const pickCat = (id: string) => { const x = c!.cats.find((k) => k.id === id)!; setCatId(id); setWorkId(null); setUsed({}); setStep(x.ask_teeth ? 'teeth' : 'works'); };
-  const pickWork = (id: string) => { if (id !== workId) setUsed({}); setWorkId(id); setGi(0); setStep('mats'); };
+  const pickWork = (id: string) => { if (id !== workId) setUsed({}); setWorkId(id); setGi(0); setStep(c?.items.find((i) => i.id === id)?.is_lab ? 'lab' : 'mats'); };
   const toggleTooth = (t: number) => { const s = new Set(teeth); if (s.has(t)) s.delete(t); else s.add(t); setTeeth(s); };
   const setRows = (rows: number[][]) => { const all = rows.flat().every((t) => teeth.has(t)); const s = new Set(teeth); rows.flat().forEach((t) => (all ? s.delete(t) : s.add(t))); setTeeth(s); };
   const back = () => {
-    if (step === 'sum') { setStep(groups.length ? 'mats' : 'works'); setGi(Math.max(0, groups.length - 1)); }
-    else if (step === 'mats') { if (gi > 0) setGi(gi - 1); else setStep('works'); }
+    if (step === 'sum') { setStep(groups.length ? 'mats' : isLab ? 'lab' : 'works'); setGi(Math.max(0, groups.length - 1)); }
+    else if (step === 'mats') { if (gi > 0) setGi(gi - 1); else setStep(isLab ? 'lab' : 'works'); }
+    else if (step === 'lab') setStep('works');
     else if (step === 'works') setStep(cat?.ask_teeth ? 'teeth' : 'cats');
     else if (step === 'teeth') setStep('cats');
   };
@@ -173,23 +187,27 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
   };
   const next = () => {
     if (step === 'teeth') setStep('works');
+    else if (step === 'lab') { if (labOk) { setGi(0); setStep('mats'); } }
     else if (step === 'mats') { if (gi < groups.length - 1) setGi(gi + 1); else setStep('sum'); }
   };
 
   const accept = useAction(() => {
     const grpOf = new Map<string, string>();
     for (const g of groups) for (const x of g.cards) grpOf.set(x.product_id, g.name);
-    const body = { items: [workId], tooth: tooth || null, qty: nTeeth, discount, discount_pct: disc.mode === 'pct' && dv ? Math.min(dv, 100) : null, materials: chosen.map(([product_id, qty]) => ({ product_id, qty, group: grpOf.get(product_id) ?? null })), warehouse_id: c?.warehouse_id ?? null };
-    return visit ? http.post<{ left: { product_id: string; qty: number }[] }>(`/api/visits/${visit.id}/works`, body)
-      : http.post<{ left: { product_id: string; qty: number }[] }>(`/api/patients/${patient.id}/works`, { ...body, branch_id: branchId });
+    const body = { items: [workId], tooth: tooth || null, qty: nTeeth, discount, discount_pct: disc.mode === 'pct' && dv ? Math.min(dv, 100) : null, materials: chosen.map(([product_id, qty]) => ({ product_id, qty, group: grpOf.get(product_id) ?? null })), warehouse_id: c?.warehouse_id ?? null,
+      lab: isLab ? { technician_id: lab.technician_id, responsible_id: lab.responsible_id, shade: lab.shade, impression: lab.impression, due_date: lab.due_date, note: lab.note.trim() || null } : null };
+    type Res = { left: { product_id: string; qty: number }[]; lab_orders: { id: string; number: number }[] };
+    return visit ? http.post<Res>(`/api/visits/${visit.id}/works`, body)
+      : http.post<Res>(`/api/patients/${patient.id}/works`, { ...body, branch_id: branchId });
   }, {
-    invalidate: ['acts', 'patients', 'visits', 'stock_balances', 'stock_docs', 'stock', 'works', 'patient-works', 'patient-history'],
+    invalidate: ['acts', 'patients', 'visits', 'stock_balances', 'stock_docs', 'stock', 'works', 'patient-works', 'patient-history', 'lab'],
     onDone: (r) => setDone({
       work: work?.name ?? '', tooth,
       mats: chosen.map(([pid, q]) => ({ name: pm.get(pid)?.name ?? '', q, unit: pm.get(pid)?.unit ?? '', left: r.left.find((x) => x.product_id === pid)?.qty ?? 0 })),
+      lab: (r.lab_orders ?? []).map((o) => o.number),
     }),
   });
-  const reset = () => { setDone(null); setUsed({}); setDiscs({}); setDiscEdit(null); setTeeth(new Set()); setWorkId(null); setCatId(null); setStep('cats'); };
+  const reset = () => { setDone(null); setUsed({}); setDiscs({}); setDiscEdit(null); setTeeth(new Set()); setWorkId(null); setCatId(null); setLab(labInit()); setStep('cats'); };
 
   /** Chegirma chizig'i: yopiq — "🏷 Chegirma" (yoki qo'yilgan chegirma), ochiq — summa va so'm|%. */
   const discStrip = (wid: string, price: number, wide?: boolean) => {
@@ -221,7 +239,8 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
   };
   const crumbs: [string, Step | null][] = [['Kategoriya', 'cats']];
   if (cat) { if (cat.ask_teeth) crumbs.push([tooth ? `Tish: ${tooth}` : 'Tish formulasi', 'teeth']); crumbs.push([cat.name, 'works']); }
-  if (work) crumbs.push([work.name, 'mats']);
+  if (work) crumbs.push([work.name, isLab ? 'lab' : 'mats']);
+  if (work && isLab) crumbs.push(['Materiallar', 'mats']);
   if (step === 'sum') crumbs.push(['Yakun', 'sum']);
   const IBTN = 'grid h-10 w-10 flex-none place-items-center rounded-lg';
   const flow = !cat_.isLoading && !done;
@@ -242,17 +261,18 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
               {crumbs.map(([l, sp], i) => (
                 <span key={i} className="flex flex-none items-center gap-0.5">
                   {i > 0 && <span aria-hidden="true" className="text-faint">›</span>}
-                  <button type="button" onClick={() => sp && setStep(sp)} className={cx('max-w-[240px] truncate rounded px-1 py-0.5 text-[13px]', sp === step ? 'font-semibold text-fg' : 'text-primary-hover')}>{l}</button>
+                  <button type="button" onClick={() => sp && go(sp)} className={cx('max-w-[240px] truncate rounded px-1 py-0.5 text-[13px]', sp === step ? 'font-semibold text-fg' : 'text-primary-hover')}>{l}</button>
                 </span>
               ))}
             </nav>
           )}
         </div>
         {flow && step === 'teeth' && <button type="button" disabled={!teeth.size} onClick={next} aria-label="Davom etish" title="Davom etish" className={cx(IBTN, 'w-14 bg-primary text-white disabled:opacity-50')}><ChevronRight size={24} /></button>}
+        {flow && step === 'lab' && <button type="button" disabled={!labOk} onClick={next} aria-label="Davom etish" title={labOk ? 'Davom etish' : 'Hamma maydonlarni to‘ldiring'} className={cx(IBTN, 'w-14 bg-primary text-white disabled:opacity-50')}><ChevronRight size={24} /></button>}
         {flow && step === 'mats' && (groups.length && gi < groups.length - 1
           ? <button type="button" onClick={() => goGroup(1)} aria-label="Keyingi guruh" title="Keyingi guruh" className={cx(IBTN, 'w-14 bg-primary text-white')}><ChevronRight size={24} /></button>
           : <button type="button" onClick={() => setStep('sum')} aria-label="Yakunlash" title="Yakunlash" className={cx(IBTN, 'w-14 bg-primary text-white')}><ChevronRight size={24} /></button>)}
-        {flow && step === 'sum' && <button type="button" disabled={accept.isPending} onClick={() => accept.mutate(undefined)} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-ok px-4 text-[15px] font-semibold text-white disabled:opacity-60"><Check size={18} /> Tasdiqlash</button>}
+        {flow && step === 'sum' && <button type="button" disabled={accept.isPending || !labOk} onClick={() => accept.mutate(undefined)} className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-ok px-4 text-[15px] font-semibold text-white disabled:opacity-60"><Check size={18} /> Tasdiqlash</button>}
         <button type="button" onClick={onClose} aria-label="Yopish" title="Yopish" className={cx(IBTN, 'text-sub hover:bg-muted')}><X size={22} /></button>
       </div>
 
@@ -273,6 +293,13 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                 </div>
               ))}
             </section>
+            {done.lab.length > 0 && (
+              <div className="flex items-center gap-3 rounded-xl border border-[#b6e3f4] bg-[#f2fbff] px-4 py-3 text-sm">
+                <FlaskConical size={20} className="flex-none text-primary-hover" />
+                <span className="flex-1">Laboratoriya buyurtmasi <b>№{done.lab.join(', №')}</b> yaratildi. Ma’sul shaxs qolipni jo‘natgach, qo‘ng‘iroqchada «Jo‘natdim»ni bosadi.</span>
+                <Link to="/lab" className="flex-none font-medium">Ochish</Link>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={onClose} className="h-10 rounded-lg bg-primary px-[18px] text-sm font-medium text-white">Yopish</button>
               <button type="button" onClick={reset} className="h-10 rounded-lg border border-line bg-white px-[18px] text-sm">Yana ish qo‘shish</button>
@@ -359,7 +386,8 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                         {money(Number(w.price))} so‘m{nTeeth > 1 && <span className="font-normal text-sub"> × {nTeeth} = <b className={cx('font-semibold text-fg', d > 0 && 'text-sub line-through')}>{money(g)}</b></span>}
                         {d > 0 && <b className="ml-1.5 text-[#b45309]">{money(g - d)}</b>}
                       </span>
-                      <span className="mt-auto text-sm text-sub">{n ? `${n} ta material` : 'Material biriktirilmagan'}</span>
+                      <span className="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-sub">{n ? `${n} ta material` : 'Material biriktirilmagan'}
+                        {w.is_lab && <span className="inline-flex items-center gap-1 rounded-full bg-[#f3e8ff] px-2 py-0.5 text-xs font-medium text-[#7c3aed]"><FlaskConical size={12} />Laboratoriya</span>}</span>
                     </button>
                     {discStrip(w.id, Number(w.price))}
                   </div>
@@ -368,6 +396,72 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
               {works.length === 0 && <div className="text-sm text-sub">Bu kategoriyada ish yo‘q.</div>}
             </div>
           )}
+
+          {step === 'lab' && work && (() => {
+            const SEC = 'flex flex-col gap-2.5 rounded-2xl border border-line bg-white p-4 sm:p-5';
+            const H = 'm-0 flex items-center gap-2 text-base font-semibold';
+            const num = (n: number) => <span className="grid h-6 w-6 flex-none place-items-center rounded-full bg-primary text-xs font-bold text-white">{n}</span>;
+            const CH = (on: boolean) => cx('min-h-12 rounded-xl border px-4 text-left text-[15px]', on ? 'border-2 border-primary bg-[#f2fbff] font-semibold' : 'border-line bg-white hover:border-primary');
+            const set = (p: Partial<LabForm>) => setLab({ ...lab, ...p });
+            const days = daysLeftText(lab.due_date);
+            return (
+              <div className="mx-auto flex max-w-[980px] flex-col gap-3">
+                <div className="flex flex-wrap items-center gap-2 rounded-xl bg-[#f3e8ff] px-4 py-2.5 text-sm text-[#5b21b6]">
+                  <FlaskConical size={18} /><b>{work.name}</b>{tooth && <span>· tish {tooth}</span>}
+                  <span className="ml-auto">Texnik ulushi: <b>{money(Number(work.tech_price))}{nTeeth > 1 && ` × ${nTeeth} = ${money(techAmount)}`} so‘m</b></span>
+                </div>
+                <section className={SEC}>
+                  <h3 className={H}>{num(1)}Qaysi texnikka berasiz?</h3>
+                  {(c?.technicians ?? []).length === 0
+                    ? <div className="text-sm text-sub">Texnik yo‘q. Kassa → Kontragentlar bo‘limida «Texnik» turida qo‘shing.</div>
+                    : <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
+                        {c!.technicians.map((t) => <button key={t.id} type="button" aria-pressed={lab.technician_id === t.id} onClick={() => set({ technician_id: t.id })} className={CH(lab.technician_id === t.id)}>{t.name}</button>)}
+                      </div>}
+                </section>
+                <section className={SEC}>
+                  <h3 className={H}>{num(2)}Ma’sul shaxs</h3>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
+                    {doctors.map((d) => (
+                      <button key={d.user_id} type="button" aria-pressed={lab.responsible_id === d.user_id} onClick={() => set({ responsible_id: d.user_id })} className={cx(CH(lab.responsible_id === d.user_id), 'flex items-center gap-2')}>
+                        <span className="h-3 w-3 flex-none rounded-full" style={{ background: d.color }} />{d.full_name}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section className={SEC}>
+                  <h3 className={H}>{num(3)}Tish rangi <span className="text-sm font-normal text-sub">(Vita)</span></h3>
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                    {SHADES.map((x) => (
+                      <button key={x.key} type="button" aria-pressed={lab.shade === x.key} onClick={() => set({ shade: x.key })} style={{ background: x.bg }}
+                        className={cx('h-12 rounded-xl text-[15px] font-bold text-[#3f3424]', lab.shade === x.key ? 'ring-[3px] ring-primary ring-offset-2' : 'border border-[#e2d8c4]')}>{x.key}</button>
+                    ))}
+                  </div>
+                </section>
+                <section className={SEC}>
+                  <h3 className={H}>{num(4)}Qolip turi</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['scan', 'cast'] as const).map((k) => {
+                      const Ic = k === 'scan' ? ScanLine : Hand;
+                      return <button key={k} type="button" aria-pressed={lab.impression === k} onClick={() => set({ impression: k })} className={cx(CH(lab.impression === k), 'flex min-h-16 items-center gap-3')}><Ic size={24} className="text-primary-hover" />{IMPRESSION[k]}</button>;
+                    })}
+                  </div>
+                </section>
+                <section className={SEC}>
+                  <h3 className={H}>{num(5)}Muddat</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {DUE_QUICK.map((n) => {
+                      const d = isoDate(addDays(new Date(), n));
+                      return <button key={n} type="button" aria-pressed={lab.due_date === d} onClick={() => set({ due_date: d })} className={cx('h-10 rounded-full px-4 text-sm', lab.due_date === d ? 'bg-primary font-semibold text-white' : 'bg-muted text-fg')}>{n} kun</button>;
+                    })}
+                    <input type="date" aria-label="Muddat sanasi" value={lab.due_date} min={isoDate(new Date())} onChange={(e) => set({ due_date: e.target.value })} className="h-10 rounded-lg border border-line bg-white px-3 text-sm" />
+                    {lab.due_date && <span className="text-sm text-sub">{dmy(lab.due_date)} · {days}</span>}
+                  </div>
+                  <textarea aria-label="Izoh" placeholder="Izoh (ixtiyoriy): masalan, shakl, maxsus talab" value={lab.note} onChange={(e) => set({ note: e.target.value })} rows={2} className="rounded-lg border border-line bg-white px-3 py-2 text-sm" />
+                </section>
+                {!labOk && <div className="text-center text-sm text-sub">Davom etish uchun 5 ta bandni ham belgilang.</div>}
+              </div>
+            );
+          })()}
 
           {step === 'mats' && (
             groups.length === 0 ? (
@@ -438,6 +532,18 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                   <div className="flex justify-between text-base font-semibold"><span>Jami</span><span className="tabular-nums">{money(net)} so‘m</span></div>
                   {work && <div className="mt-1 overflow-hidden">{discStrip(work.id, Number(work.price), true)}</div>}
                 </div>
+                {isLab && (
+                  <button type="button" onClick={() => setStep('lab')} className="flex w-full flex-col gap-1 border-b border-line bg-[#faf5ff] px-4 py-3 text-left text-sm">
+                    <span className="flex items-center gap-2 font-semibold text-[#6d28d9]"><FlaskConical size={16} />Laboratoriya buyurtmasi</span>
+                    <span className="grid grid-cols-[110px_1fr] gap-x-2 gap-y-0.5">
+                      <span className="text-sub">Texnik</span><b>{c?.technicians.find((t) => t.id === lab.technician_id)?.name ?? '—'}</b>
+                      <span className="text-sub">Ma’sul</span><b>{memberName(lab.responsible_id) || '—'}</b>
+                      <span className="text-sub">Rang · qolip</span><b>{lab.shade || '—'} · {lab.impression ? IMPRESSION[lab.impression] : '—'}</b>
+                      <span className="text-sub">Muddat</span><b>{dmy(lab.due_date)} <span className="font-normal text-sub">({daysLeftText(lab.due_date)})</span></b>
+                      <span className="text-sub">Texnik ulushi</span><b>{money(techAmount)} so‘m <span className="font-normal text-sub">— bemor to‘lagan sari</span></b>
+                    </span>
+                  </button>
+                )}
                 {chosen.length === 0 && <div className="px-4 py-4 text-sm text-sub">Material tanlanmagan — faqat ish yoziladi.</div>}
                 {chosen.map(([pid, q]) => {
                   const p = pm.get(pid)!;

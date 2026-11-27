@@ -12,6 +12,7 @@ export interface User { id: string; full_name: string; email: string | null; pho
 export interface Org {
   id: string; name: string; logo_url: string | null; currency: string; timezone: string;
   stock_mode: 'simple' | 'mid' | 'exact'; allow_negative_stock: boolean; telegram_chat_id: string | null; doctor_share_percent: number;
+  lab_warn_days: number;
 }
 
 export interface Branch {
@@ -51,7 +52,7 @@ export type CatIcon = 'cons' | 'tooth' | 'hyg' | 'crown' | 'braces' | 'surg';
 export interface PriceCategory { id: string; org_id: string; name: string; color_idx: number; position: number; icon: CatIcon; ask_teeth: boolean }
 export interface PriceItem {
   id: string; org_id: string; category_id: string; name: string; code: string | null; price: number;
-  position: number; archived: boolean;
+  position: number; archived: boolean; is_lab: boolean; tech_price: number;
 }
 
 export interface Cashbox { id: string; org_id: string; branch_id: string; name: string; method: string; position: number; archived: boolean }
