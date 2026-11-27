@@ -220,7 +220,13 @@ export async function workRoutes(app: FastifyInstance) {
                     and m.moved_at >= $3::date and m.moved_at < $4::date + 1 order by m.moved_at`, p),
         one(c, 'select doctor_share_percent from orgs where id = $1', [m.org_id]),
       ]);
-      return { work, income, expense, share_percent: Number(org?.doctor_share_percent ?? 30) };
+      // Shifokorlar qancha topdi: har bir ishning ulushi (praysdagi % yoki so'm) × davrda to'langan qism.
+      const doctors = await many(c, `select d.*, pt.full_name who, a.act_date, ${MEM('d.doctor_id')} doc,
+                                            (select string_agg(ai.name || case when ai.qty > 1 then ' ×' || ai.qty::text else '' end, ', ' order by ai.id) from act_items ai where ai.act_id = d.act_id) works
+                                       from doctor_earned_period($1, $2, $3::date, $4::date) d
+                                       join patients pt on pt.id = d.patient_id join acts a on a.id = d.act_id
+                                      order by a.act_date, pt.full_name`, p);
+      return { work, income, expense, doctors, share_percent: Number(org?.doctor_share_percent ?? 30) };
     });
   });
 }

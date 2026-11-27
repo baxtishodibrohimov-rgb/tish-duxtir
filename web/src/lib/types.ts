@@ -53,6 +53,7 @@ export interface PriceCategory { id: string; org_id: string; name: string; color
 export interface PriceItem {
   id: string; org_id: string; category_id: string; name: string; code: string | null; price: number;
   position: number; archived: boolean; is_lab: boolean; tech_price: number;
+  doctor_share_type: 'pct' | 'sum' | null; doctor_share: number | null;
 }
 
 export interface Cashbox { id: string; org_id: string; branch_id: string; name: string; method: string; position: number; archived: boolean }

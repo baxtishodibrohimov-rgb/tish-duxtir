@@ -9,3 +9,4 @@ $P -c "drop database if exists $DB" -c "create database $DB"
 for f in migrations/*.sql; do $P -d "$DB" -f "$f"; done
 $P -d "$DB" -f tests/warehouse_test.sql 2>&1 | grep -E 'OK:|ERROR'
 $P -d "$DB" -f tests/lab_test.sql 2>&1 | grep -E 'OK:|ERROR'
+$P -d "$DB" -f tests/doctor_share_test.sql 2>&1 | grep -E "OK:|ERROR"

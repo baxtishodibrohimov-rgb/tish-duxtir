@@ -167,7 +167,13 @@ interface Details {
   work: { patient_id: string; who: string; doc: string | null; work: number; paid: number }[];
   income: { id: string; at: string; kind: string; amount: number; who: string | null; box: string; by_name: string | null; doctor_id: string | null; doc: string | null }[];
   expense: { id: string; at: string; amount: number; box: string; by_name: string | null; who: string }[];
+  doctors: DocShare[];
   share_percent: number;
+}
+/** Davr ichida shifokorga yozilgan ulush — har bir ish (akt) bo'yicha. */
+interface DocShare {
+  act_id: string; patient_id: string; doctor_id: string | null; doc: string | null; who: string; works: string | null; act_date: string;
+  total: number; doctor_total: number; paid_before: number; paid_after: number; earned: number;
 }
 type CardKey = 'ish' | 'pul' | 'xar' | 'foyda';
 
@@ -182,7 +188,7 @@ function Boxes({ period }: { period: Period }) {
   const [boxOpen, setBoxOpen] = useState<string | null>(null);
   const [doc, setDoc] = useState<string | null>(null);
   const incomeRows = useMemo(() => (det.data?.income ?? []).filter((m) => m.kind === 'income'), [det.data]);
-  const docs = useDocs(incomeRows);
+  const docs = useDocs(det.data?.doctors);
   if (s.isLoading) return <PageLoader />;
   const d = s.data!;
   const x = det.data;
@@ -190,7 +196,6 @@ function Boxes({ period }: { period: Period }) {
     ['ish', 'qilingan ish', d.work_done, 'text-fg'], ['pul', 'kassaga tushgan pul', d.income, 'text-ok'], ['xar', 'xarajat', d.expense, 'text-[#b91c1c]'], ['foyda', 'foyda', d.profit, d.profit >= 0 ? 'text-[#0086b8]' : 'text-[#b91c1c]'],
   ];
   const titles: Record<CardKey, string> = { ish: 'Qilingan ish — har bir bemor bo‘yicha', pul: 'Kassaga tushgan pul — har bir to‘lov', xar: 'Xarajat — har bir chiqim', foyda: 'Foyda qanday hisoblandi' };
-  const pct = x?.share_percent ?? 30;
   const allIn = incomeRows.reduce((a, m) => a + m.amount, 0);
   const TH_ = 'px-3 py-2 font-medium';
   const NUM = 'px-3 py-2 text-right whitespace-nowrap tabular-nums';
@@ -213,19 +218,20 @@ function Boxes({ period }: { period: Period }) {
     if (k === 'foyda') rows = [['Ko‘rsatkich', 'Summa'], ['Kassaga tushgan pul', Number(d.income)], ['Xarajat', -Number(d.expense)], ['Foyda', Number(d.profit)]];
     downloadXlsx(fname(titles[k].split(' — ')[0]!), [{ name: titles[k].split(' — ')[0]!, rows: [...head, ...rows], bold: [0, 2, head.length + rows.length - 1] }]);
   }
-  // Shifokor varag'i: faqat to'lovlar va shifokor ulushi.
+  // Shifokor varag'i: har bir ish — summasi, ulushi, davrda to'langani va shifokorga tushgani.
   const doctorSheet = (g: (typeof docs)[number]): XSheet => {
-    const pays: XCell[][] = g.rows.map((m) => [tm(m.at), m.who ?? '', m.box, Number(m.amount), Math.round((m.amount * pct) / 100)]);
-    const rows: XCell[][] = [[`Shifokor: ${g.name}`], [`${branch.name} · ${per} · ulush ${pct}%`], [],
-      ['Vaqt', 'Bemor', 'To‘lov usuli', 'To‘langan', `Shifokorga ${pct}%`], ...pays,
-      ['Jami', `${g.patients} ta bemor`, '', g.sum, Math.round((g.sum * pct) / 100)]];
-    return { name: g.name, rows, bold: [0, 3, rows.length - 1], widths: [18, 28, 16, 16, 16] };
+    const list: XCell[][] = g.rows.map((r) => [dmy(r.act_date), r.who, r.works ?? '', Number(r.total), Number(r.doctor_total), r.paid_after - r.paid_before, Number(r.earned)]);
+    const rows: XCell[][] = [[`Shifokor: ${g.name}`], [`${branch.name} · ${per}`], [],
+      ['Ish sanasi', 'Bemor', 'Ish', 'Ish summasi', 'Shifokor ulushi', 'Davrda to‘langan', 'Shifokorga'], ...list,
+      ['Jami', `${g.patients} ta bemor`, '', '', '', g.sum, g.earned]];
+    return { name: g.name, rows, bold: [0, 3, rows.length - 1], widths: [12, 26, 34, 14, 14, 16, 14] };
   };
+  const allEarned = docs.reduce((a, g) => a + g.earned, 0);
   function exportDoctors() {
-    const sum: XCell[][] = [[`Shifokorlar qancha topdi · ${branch.name} · ${per}`], [], ['Shifokor', 'Bemorlar', 'Tushum (to‘lov)', 'Ulush %', 'Shifokorga'],
-      ...docs.map((g) => [g.name, g.patients, g.sum, pct, Math.round((g.sum * pct) / 100)]),
-      ['Jami', docs.reduce((a, g) => a + g.patients, 0), allIn, '', docs.reduce((a, g) => a + Math.round((g.sum * pct) / 100), 0)]];
-    downloadXlsx(fname('Shifokorlar'), [{ name: 'Umumiy', rows: sum, bold: [0, 2, sum.length - 1], widths: [28, 12, 18, 10, 16] }, ...docs.map(doctorSheet)]);
+    const sum: XCell[][] = [[`Shifokorlar qancha topdi · ${branch.name} · ${per}`], [], ['Shifokor', 'Bemorlar', 'Davrda to‘langan', 'Shifokorga'],
+      ...docs.map((g) => [g.name, g.patients, g.sum, g.earned]),
+      ['Jami', docs.reduce((a, g) => a + g.patients, 0), docs.reduce((a, g) => a + g.sum, 0), allEarned]];
+    downloadXlsx(fname('Shifokorlar'), [{ name: 'Umumiy', rows: sum, bold: [0, 2, sum.length - 1], widths: [28, 12, 18, 16] }, ...docs.map(doctorSheet)]);
   }
   return (
     <div className="flex flex-col gap-3">
@@ -312,12 +318,13 @@ function Boxes({ period }: { period: Period }) {
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3.5">
           <Stethoscope size={18} className="text-primary" />
           <h3 className="m-0 flex-1 text-base font-semibold">{lbl} — shifokorlar qancha topdi</h3>
-          <span className="text-[13px] text-sub">Jami: <b className="text-fg">{som(allIn)}</b></span>
+          <span className="text-[13px] text-sub">Kassaga tushgan: <b className="text-fg">{som(allIn)}</b> · shifokorlarga: <b className="text-[#5b21b6]">{som(allEarned)}</b></span>
           {docs.length > 0 && <XlsBtn onClick={exportDoctors} title="Barcha shifokorlar hisoboti (har biri alohida varaqda)" />}
         </div>
-        {docs.length === 0 && <div className="p-6 text-center text-sm text-sub">Bu davrda to‘lov yo‘q</div>}
+        {docs.length === 0 && <div className="p-6 text-center text-sm text-sub">Bu davrda shifokorlarga ulush yozilmagan</div>}
         {docs.map((g, i) => {
-          const p = allIn ? Math.round((g.sum * 100) / allIn) : 0, on = doc === g.key;
+          const tot = docs.reduce((a, d) => a + d.sum, 0);
+          const p = tot ? Math.round((g.sum * 100) / tot) : 0, on = doc === g.key;
           return (
             <div key={g.key} className={cx(i > 0 && 'border-t border-line', on && 'bg-[#f3fafd]')}>
               <button type="button" onClick={() => setDoc(on ? null : g.key)} aria-expanded={on} className="flex w-full flex-wrap items-center gap-3 px-4 py-3.5 text-left">
@@ -326,18 +333,24 @@ function Boxes({ period }: { period: Period }) {
                 <span className="h-1.5 w-[140px] overflow-hidden rounded-full bg-[#eef3f6]"><span className="block h-full rounded-full bg-primary" style={{ width: `${p}%` }} /></span>
                 <span className="min-w-[130px] text-right text-base font-bold whitespace-nowrap tabular-nums">{som(g.sum)}</span>
                 <span className="flex min-w-[150px] flex-col items-end gap-0.5 rounded-[10px] bg-[#f3effe] px-2.5 py-1.5 whitespace-nowrap tabular-nums">
-                  <span className="text-[11px] text-[#5b21b6]">Shifokorga {pct}%</span><b className="text-sm text-[#5b21b6]">{som(Math.round((g.sum * pct) / 100))}</b>
+                  <span className="text-[11px] text-[#5b21b6]">Shifokorga</span><b className="text-sm text-[#5b21b6]">{som(g.earned)}</b>
                 </span>
               </button>
               {on && (
                 <div className="overflow-x-auto px-4 pb-3.5 pl-11">
                   <div className="mb-2 flex justify-end"><XlsBtn label={`${g.name} — Excel`} title="Shu shifokorning hisoboti" onClick={() => downloadXlsx(fname(g.name), [doctorSheet(g)])} /></div>
                   <table className="w-full overflow-hidden rounded-[10px] border border-line bg-white text-sm">
-                    <thead className="bg-muted/70"><tr className="text-left text-xs text-sub uppercase"><th className={TH_}>Vaqt</th><th className={TH_}>Bemor</th><th className={TH_}>To‘lov</th><th className={cx(TH_, 'text-right')}>Topgani</th><th className={cx(TH_, 'text-right')}>Shifokorga {pct}%</th></tr></thead>
-                    <tbody>{g.rows.map((m) => (
-                      <tr key={m.id} className="border-t border-line"><td className="px-3 py-2 whitespace-nowrap text-sub">{oneDay ? hm(m.at) : dmyhm(m.at)}</td><td className="px-3 py-2 font-medium">{m.who ?? '—'}</td><td className="px-3 py-2 text-[#3d4858]">{m.box}</td>
-                        <td className={cx(NUM, 'font-semibold text-ok')}>{som(m.amount)}</td><td className={cx(NUM, 'font-semibold text-[#5b21b6]')}>{som(Math.round((m.amount * pct) / 100))}</td></tr>
-                    ))}</tbody>
+                    <thead className="bg-muted/70"><tr className="text-left text-xs text-sub uppercase"><th className={TH_}>Bemor</th><th className={TH_}>Ish</th><th className={cx(TH_, 'text-right')}>Ish summasi</th><th className={cx(TH_, 'text-right')}>Ulushi</th><th className={cx(TH_, 'text-right')}>Davrda to‘langan</th><th className={cx(TH_, 'text-right')}>Shifokorga</th></tr></thead>
+                    <tbody>{g.rows.map((r) => {
+                      const paid = r.paid_after - r.paid_before, full = r.total > 0 && r.paid_after >= r.total;
+                      return (
+                        <tr key={r.act_id} className="border-t border-line"><td className="px-3 py-2 font-medium">{r.who}<div className="text-xs font-normal text-sub">{dmy(r.act_date)}</div></td>
+                          <td className="px-3 py-2 text-[#3d4858]">{r.works ?? '—'}</td>
+                          <td className={NUM}>{som(r.total)}</td><td className={cx(NUM, 'text-sub')}>{som(r.doctor_total)}</td>
+                          <td className={cx(NUM, 'font-semibold', paid < 0 ? 'text-bad' : 'text-ok')}>{som(paid)}{full && <div className="text-[11px] font-normal text-sub">to‘liq to‘langan</div>}</td>
+                          <td className={cx(NUM, 'font-semibold', r.earned < 0 ? 'text-bad' : 'text-[#5b21b6]')}>{som(r.earned)}</td></tr>
+                      );
+                    })}</tbody>
                   </table>
                 </div>
               )}
@@ -349,7 +362,6 @@ function Boxes({ period }: { period: Period }) {
   );
 }
 
-/** Tushumni shifokorlar bo'yicha guruhlash (to'lovdagi shifokor, bo'lmasa akt shifokori). */
 /** Kassa kartasi bosilganda: shu kassaning tanlangan davrdagi barcha harakatlari. */
 function BoxDetail({ box, from, to, lbl, oneDay, onClose }: { box: Summary['cashboxes'][number]; from: string; to: string; lbl: string; oneDay: boolean; onClose: () => void }) {
   const { memberName } = useOrg();
@@ -410,15 +422,16 @@ function BoxDetail({ box, from, to, lbl, oneDay, onClose }: { box: Summary['cash
   );
 }
 
-function useDocs(rows: Details['income']) {
+/** Shifokorlar bo'yicha guruhlash: ishni qilgan (akt) shifokor; sum — davrda to'langan, earned — shifokorga. */
+function useDocs(rows: DocShare[] | undefined) {
   return useMemo(() => {
-    const m = new Map<string, { key: string; name: string; sum: number; pats: Set<string>; rows: Details['income'] }>();
-    for (const r of rows) {
+    const m = new Map<string, { key: string; name: string; sum: number; earned: number; pats: Set<string>; rows: DocShare[] }>();
+    for (const r of rows ?? []) {
       const key = r.doctor_id ?? '-';
-      const g = m.get(key) ?? { key, name: r.doc ?? 'Shifokor ko‘rsatilmagan', sum: 0, pats: new Set<string>(), rows: [] };
-      g.sum += r.amount; if (r.who) g.pats.add(r.who); g.rows.push(r); m.set(key, g);
+      const g = m.get(key) ?? { key, name: r.doc ?? 'Shifokor ko‘rsatilmagan', sum: 0, earned: 0, pats: new Set<string>(), rows: [] };
+      g.sum += r.paid_after - r.paid_before; g.earned += Number(r.earned); g.pats.add(r.patient_id); g.rows.push(r); m.set(key, g);
     }
-    return [...m.values()].map((g) => ({ ...g, patients: g.pats.size })).sort((a, b) => b.sum - a.sum);
+    return [...m.values()].map((g) => ({ ...g, patients: g.pats.size })).sort((a, b) => b.earned - a.earned);
   }, [rows]);
 }
 

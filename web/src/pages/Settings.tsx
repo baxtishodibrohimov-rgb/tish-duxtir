@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useOrg, ROLE_LABEL, ALL_PERMS, roleDefault } from '@/lib/auth';
 import { db, http } from '@/lib/api';
 import { useAction, useList, byId } from '@/lib/hooks';
-import { dmy, hm, initials, isoDate, phoneFmt } from '@/lib/format';
+import { dmy, hm, initials, isoDate, money, phoneFmt } from '@/lib/format';
 import { useQueryParam, useTitle } from '@/lib/router';
 import type { Brand, Branch, CalcCard, CatIcon, WorkMatGroup, Member, PatientStatus, Perm, PriceCategory, PriceItem, Product, Role, Room } from '@/lib/types';
 import { Badge, Button, Card, Confirm, Empty, Field, Input, Modal, Select, Switch, Toggle, cx } from '@/components/ui';
@@ -214,15 +214,15 @@ function Salary() {
   return (
     <div className="flex flex-col gap-4">
       <Group title="Xodimlar maoshi">
-        <Item label="Shifokor ulushi, %" hint="Kassa → «Bugun — shifokorlar qancha topdi» shu foiz bilan hisoblanadi">
+        <Item label="Umumiy shifokor ulushi, %" hint="Praysda alohida ulush yozilmagan ishlar uchun. Har bir ishga alohida ulush: Sozlamalar → Prays">
           <span className="flex items-center gap-2">
             <input type="number" min={0} max={100} aria-label="Shifokor ulushi" className={cx(SIN, '!w-24 text-right')} value={pct} onChange={(e) => setPct(e.target.value)} />
             <Button size="sm" variant="primary" loading={save.isPending} onClick={() => save.mutate(undefined)}>Saqlash</Button>
           </span>
         </Item>
         <div className="py-3 text-sm text-sub">
-          To‘liq ish haqi hisoblash (stavkalar, ishlar bo‘yicha alohida foiz, berish jurnali) hali qo‘shilmagan. Xodimga berilgan pulni
-          Kassa → «Xarajat» orqali kiritish mumkin.
+          Shifokorga ulush bemor to‘lagan sari yoziladi: to‘liq to‘lasa — to‘liq, yarmini to‘lasa — yarmi. Natija Kassa → «shifokorlar qancha topdi» qismida.
+          Xodimga berilgan pulni Kassa → «Xarajat» orqali kiritish mumkin.
         </div>
       </Group>
     </div>
@@ -578,7 +578,6 @@ function Statuses() {
 
 // ---------------- Prays ----------------
 const PCOL: [string, string][] = [['#ece3fb', '#cdbdf0'], ['#e4e6f8', '#c5c9ef'], ['#d9eefb', '#aed6f1'], ['#dff4e6', '#b6e2c4'], ['#fdece2', '#f4c9ad'], ['#fdf4da', '#f0dc9c']];
-const nfp = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Kiritilgan qiymatni yozishni to'xtatgandan keyin saqlaydi. */
 function useSaver(save: (v: string) => void, delay = 600) {
@@ -588,6 +587,7 @@ function useSaver(save: (v: string) => void, delay = 600) {
 }
 
 function Price() {
+  const { org } = useOrg();
   const cats = useList<PriceCategory>('price_categories');
   const items = useList<PriceItem>('price_items', { archived: false });
   const [del, setDel] = useState<PriceCategory | null>(null);
@@ -601,7 +601,8 @@ function Price() {
     <div className="flex max-w-[1380px] flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-3">
         <h2 className="m-0 text-lg font-semibold">Prays</h2>
-        <span className="text-[13px] text-sub">Nomi, kodi va narxini shu yerning o‘zida o‘zgartiring — o‘zgarishlar darhol saqlanadi.</span>
+        <span className="text-[13px] text-sub">Nomi, kodi, narxi va shifokor ulushini shu yerning o‘zida o‘zgartiring — o‘zgarishlar darhol saqlanadi.
+          Ulush bo‘sh bo‘lsa — umumiy {org.doctor_share_percent ?? 30}% (Sozlamalar → Maosh).</span>
       </div>
       {cats.data?.length === 0 && <Card><Empty>Prays bo‘sh. Birinchi kategoriyani qo‘shing.</Empty></Card>}
       {(cats.data ?? []).map((c) => {
@@ -616,7 +617,12 @@ function Price() {
               <button type="button" onClick={() => setDel(c)} aria-label="Kategoriyani o‘chirish" title="Kategoriyani o‘chirish" className="grid h-8 w-8 place-items-center text-sub"><Trash2 size={18} /></button>
             </div>
             <div className="flex flex-col pr-2 pb-2.5 pl-3">
-              {its.map((i) => <PriceRow key={i.id} i={i} col={col[1]} onDelete={() => delItem.mutate(i)} />)}
+              {its.length > 0 && (
+                <div className="ml-[34px] mr-10 grid text-[11px] text-sub uppercase" style={{ gridTemplateColumns: PRICE_COLS }}>
+                  <span className="px-1.5">Xizmat</span><span className="px-1.5">Kod</span><span className="px-1.5 text-right">Narx</span><span className="px-1.5">Shifokor ulushi</span><span className="px-1.5 text-right">Shifokorga</span>
+                </div>
+              )}
+              {its.map((i) => <PriceRow key={i.id} i={i} col={col[1]} defPct={org.doctor_share_percent ?? 30} onDelete={() => delItem.mutate(i)} />)}
               <button type="button" onClick={() => addItem.mutate(c.id)}
                 className="mt-2 ml-[34px] inline-flex h-8 items-center gap-2 self-start rounded bg-white px-3 text-sm shadow-[0_1px_2px_rgba(7,18,30,.08)]">
                 <Plus size={16} className="text-[#3d4858]" /> Prays pozitsiyasini qo‘shish
@@ -646,25 +652,42 @@ function CatName({ c, onSave }: { c: PriceCategory; onSave: (v: string) => void 
   );
 }
 
-function PriceRow({ i, col, onDelete }: { i: PriceItem; col: string; onDelete: () => void }) {
-  const [f, setF] = useState({ name: i.name, code: i.code ?? '', price: String(i.price) });
+const PRICE_COLS = 'minmax(0,1fr) 80px 150px 170px 120px';
+function PriceRow({ i, col, defPct, onDelete }: { i: PriceItem; col: string; defPct: number; onDelete: () => void }) {
+  const [f, setF] = useState({ name: i.name, code: i.code ?? '', price: String(i.price), share: i.doctor_share == null ? '' : String(Number(i.doctor_share)), stype: (i.doctor_share_type ?? 'pct') as 'pct' | 'sum' });
   const upd = useAction((patch: Partial<PriceItem>) => db.update('price_items', i.id, patch), { invalidate: ['price_items'] });
   const saveName = useSaver((v) => upd.mutate({ name: v }));
   const saveCode = useSaver((v) => upd.mutate({ code: v || null }));
   const savePrice = useSaver((v) => upd.mutate({ price: Math.max(0, Math.round(Number(v) || 0)) }));
+  // Shifokor ulushi: bo'sh — umumiy foiz; % (0–100) yoki 1 tish uchun so'm.
+  const shareOf = (v: string, t: 'pct' | 'sum') => (v.trim() === '' ? { doctor_share: null, doctor_share_type: null }
+    : { doctor_share: t === 'pct' ? Math.min(100, Math.max(0, Number(v) || 0)) : Math.max(0, Math.round(Number(v) || 0)), doctor_share_type: t });
+  const saveShare = useSaver((v) => upd.mutate(shareOf(v, f.stype)));
+  const price = Number(f.price) || 0, sv = Number(f.share) || 0;
+  const docAmt = f.share.trim() === '' ? Math.round((price * defPct) / 100) : f.stype === 'pct' ? Math.round((price * Math.min(sv, 100)) / 100) : sv;
   const cell = { borderLeft: `1px solid ${col}` };
   return (
     <div className="flex items-center gap-2.5">
       <span title="Tartib" className="grid w-6 place-items-center text-sub"><Menu size={18} /></span>
-      <div className="grid min-w-0 flex-1 items-center bg-white/60" style={{ gridTemplateColumns: 'minmax(0,1fr) 80px 160px 28px 140px', border: `1px solid ${col}`, borderTop: 0 }}>
+      <div className="grid min-w-0 flex-1 items-center bg-white/60" style={{ gridTemplateColumns: PRICE_COLS, border: `1px solid ${col}`, borderTop: 0 }}>
         <input aria-label="Xizmat nomi" value={f.name} placeholder="Xizmat nomi" onChange={(e) => { setF({ ...f, name: e.target.value }); saveName(e.target.value); }} className="h-[30px] min-w-0 bg-transparent px-1.5 text-sm outline-none" />
         <input aria-label="Kod" placeholder="Kod" value={f.code} onChange={(e) => { setF({ ...f, code: e.target.value }); saveCode(e.target.value); }} className="h-[30px] min-w-0 bg-transparent px-1.5 text-sm outline-none" style={cell} />
         <span className="flex items-center gap-1 pr-1.5" style={cell}>
           <input type="number" min={0} aria-label="Narx" value={f.price} onChange={(e) => { setF({ ...f, price: e.target.value }); savePrice(e.target.value); }} className="h-[30px] w-full min-w-0 bg-transparent px-1 text-right text-sm outline-none" />
           <span className="text-[13px] text-[#3d4858]">so‘m</span>
         </span>
-        <span aria-hidden="true" className="grid place-items-center text-[15px] text-[#3d4858]">→</span>
-        <span title="Yakuniy narx" className="flex items-center justify-end px-1.5 text-sm whitespace-nowrap text-faint">{nfp.format(Number(f.price) || 0)} so‘m</span>
+        <span className="flex items-center gap-1 pr-1" style={cell}>
+          <input type="number" min={0} max={f.stype === 'pct' ? 100 : undefined} aria-label={`${i.name || 'Xizmat'}: shifokor ulushi`} placeholder={`${defPct}%`} value={f.share}
+            onChange={(e) => { setF({ ...f, share: e.target.value }); saveShare(e.target.value); }} className="h-[30px] w-full min-w-0 bg-transparent px-1 text-right text-sm outline-none placeholder:text-faint" />
+          <span role="radiogroup" aria-label="Ulush turi" className="flex flex-none rounded bg-white p-px ring-1 ring-line">
+            {(['pct', 'sum'] as const).map((t) => (
+              <button key={t} type="button" role="radio" aria-checked={f.stype === t}
+                onClick={() => { setF({ ...f, stype: t }); if (f.share.trim() !== '') upd.mutate(shareOf(f.share, t)); }}
+                className={cx('h-6 min-w-7 rounded-sm px-1 text-xs', f.stype === t ? 'bg-primary font-semibold text-white' : 'text-sub')}>{t === 'pct' ? '%' : 'so‘m'}</button>
+            ))}
+          </span>
+        </span>
+        <span title={f.share.trim() === '' ? `Umumiy ${defPct}%` : f.stype === 'sum' ? '1 tish uchun' : 'Narxdan foiz'} className={cx('flex items-center justify-end px-1.5 text-sm whitespace-nowrap', f.share.trim() === '' ? 'text-faint' : 'font-medium text-[#5b21b6]')} style={cell}>{money(docAmt)} so‘m</span>
       </div>
       <button type="button" onClick={onDelete} aria-label="Pozitsiyani o‘chirish" title="O‘chirish" className="grid h-[30px] w-[30px] place-items-center text-sub"><Trash2 size={17} /></button>
     </div>

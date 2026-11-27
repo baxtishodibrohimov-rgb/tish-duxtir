@@ -51,7 +51,7 @@ const R: Record<string, Resource> = {
   price_categories: { table: 'price_categories', scope: 'org', read: null, write: 'settings.edit',
     columns: ['name', 'color_idx', 'position', 'icon', 'ask_teeth'], order: 'position, name' },
   price_items: { table: 'price_items', scope: 'org', read: null, write: 'settings.edit',
-    columns: ['category_id', 'name', 'code', 'price', 'position', 'archived', 'is_lab', 'tech_price'], filters: ['category_id', 'archived', 'is_lab'],
+    columns: ['category_id', 'name', 'code', 'price', 'position', 'archived', 'is_lab', 'tech_price', 'doctor_share_type', 'doctor_share'], filters: ['category_id', 'archived', 'is_lab'],
     search: ['name', 'code'], order: 'position, name' },
   treatment_plans: { table: 'treatment_plans', scope: 'org', read: 'patients.view', write: 'patients.edit',
     columns: ['patient_id', 'doctor_id', 'title', 'status', 'discount_percent', 'kind', 'approved', 'note', 'plan_date', 'show_price', 'stages'],
