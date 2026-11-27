@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, X, Check, ChevronLeft, ChevronRight, Minus, Plus, Tag } from 'lucide-react';
 import { useOrg } from '@/lib/auth';
@@ -52,13 +52,13 @@ const calcDisc = (d: Disc | undefined, gross: number) => {
 };
 
 /**
- * Sensorli ekranda surish: ↑ ↓ ← → (sichqonchada ishlamaydi — u yerda tugmalar).
+ * Surish: ↑ ↓ ← → — barmoq bilan ham, sichqoncha bilan ham (chap tugmani bosib turib surish).
  * Surishdan keyin keladigan "click" bekor qilinadi.
  */
 const SW = { x0: 0, y0: 0, id: -1 }; // bir vaqtda bitta surish — qayta chizilishdan qat'i nazar saqlanadi
 function swipe(h: { onUp?: () => void; onDown?: () => void; onLeft?: () => void; onRight?: () => void }) {
   return {
-    onPointerDown: (e: React.PointerEvent) => { if (e.pointerType === 'mouse') return; SW.x0 = e.clientX; SW.y0 = e.clientY; SW.id = e.pointerId; },
+    onPointerDown: (e: React.PointerEvent) => { if (e.pointerType === 'mouse' && e.button !== 0) return; SW.x0 = e.clientX; SW.y0 = e.clientY; SW.id = e.pointerId; },
     onPointerUp: (e: React.PointerEvent) => {
       if (e.pointerId !== SW.id) return;
       SW.id = -1;
@@ -72,6 +72,8 @@ function swipe(h: { onUp?: () => void; onDown?: () => void; onLeft?: () => void;
       else (dx > 0 ? h.onRight : h.onLeft)?.();
     },
     onPointerCancel: () => { SW.id = -1; },
+    // Sichqonchada rasmni "sudrab olib ketish" surishni bekor qiladi — o'chiramiz
+    onDragStart: (e: React.DragEvent) => e.preventDefault(),
   };
 }
 
@@ -150,6 +152,18 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
     if (dir > 0) { setSlide('r'); if (gi < groups.length - 1) setGi(gi + 1); else setStep('sum'); }
     else if (gi > 0) { setSlide('l'); setGi(gi - 1); }
   };
+  // Kompyuterda klaviatura: → keyingi guruh, ← oldingi (faqat materiallar bosqichida, maydonga yozilmayotganda)
+  useEffect(() => {
+    if (step !== 'mats') return;
+    const k = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); goGroup(1); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); goGroup(-1); }
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  });
   const bump = (pid: string, delta: number, base: number) => {
     const q = used[pid] ?? 0;
     if (delta < 0 && q <= 0) return; // 0 bo'lsa kamaymaydi
@@ -363,14 +377,14 @@ export function WorksWizard({ visit, patient, branchId, onClose }: { visit?: Vis
                   })}
                 </div>
                 <h3 className="m-0 text-xl font-semibold">{grp.name} <span className="text-base font-normal text-sub">· guruh {gi + 1}/{groups.length}</span>
-                  <span className="ml-2 hidden text-xs font-normal text-faint [@media(pointer:coarse)]:inline">kartani ↑ surish +, ↓ surish −; ekranni → keyingi, ← oldingi guruh</span></h3>
-                <div key={`${gi}`} {...swipe({ onRight: () => goGroup(1), onLeft: () => goGroup(-1) })} style={{ touchAction: 'pan-y' }}
+                  <span className="ml-2 text-xs font-normal text-faint">kartani ↑ surish +, ↓ surish −; ekranni ← keyingi, → oldingi guruh<span className="[@media(pointer:coarse)]:hidden"> · klaviaturada ← →</span></span></h3>
+                <div key={`${gi}`} {...swipe({ onLeft: () => goGroup(1), onRight: () => goGroup(-1) })} style={{ touchAction: 'pan-y' }}
                   className={cx('grid min-h-[50vh] grid-cols-2 content-start gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4', slide === 'r' ? 'td-in-r' : 'td-in-l')}>
                   {grp.cards.map((x) => {
                     const p = pm.get(x.product_id)!;
                     const q = used[p.id] ?? 0, on = q > 0, st = x.qty % 1 ? x.qty : 1;
                     return (
-                      <div key={p.id} {...swipe({ onUp: () => bump(p.id, 1, st), onDown: () => bump(p.id, -1, st), onRight: () => goGroup(1), onLeft: () => goGroup(-1) })}
+                      <div key={p.id} {...swipe({ onUp: () => bump(p.id, 1, st), onDown: () => bump(p.id, -1, st), onLeft: () => goGroup(1), onRight: () => goGroup(-1) })}
                         style={{ touchAction: 'none' }}
                         className={cx('relative flex flex-col overflow-hidden rounded-2xl bg-white select-none', on ? 'border-[3px] border-primary shadow-[0_4px_16px_rgba(0,134,184,.18)]' : 'border border-line')}>
                         <button type="button" onClick={() => { if (!on) bump(p.id, 1, x.qty); }} aria-pressed={on} aria-label={`${p.name}${on ? '' : ': tanlash'}`} className="relative">
