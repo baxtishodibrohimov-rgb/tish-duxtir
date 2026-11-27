@@ -8,7 +8,7 @@ import { useAction, useList, byId } from '@/lib/hooks';
 import { addDays, dmy, dmyhm, hm, initials, isoDate, money, som } from '@/lib/format';
 import { useQueryParam, useTitle } from '@/lib/router';
 import type { Cashbox as Box, Counterparty, ExpenseCategory, MoneyMove, Patient } from '@/lib/types';
-import { CounterpartyForm, CP_TYPE } from '@/components/CounterpartyForm';
+import { CounterpartyForm, CpTypesModal, useCpTypes } from '@/components/CounterpartyForm';
 import { PatientPicker } from '@/components/PatientPicker';
 import { Button, Card, Empty, Field, Input, Modal, PageLoader, PillTabs, Select, TD, TH, cx } from '@/components/ui';
 import { TechList, TechProfile } from './Technicians';
@@ -524,6 +524,7 @@ function MoveModal({ kind, onClose }: { kind: MoneyMove['kind']; onClose: () => 
   const boxes = useList<Box>('cashboxes', { branch_id: branch.id, archived: false });
   const cats = useList<ExpenseCategory>('expense_categories', { archived: false });
   const cps = useList<Counterparty>('counterparties', { archived: false });
+  const ct = useCpTypes();
   const [box, setBox] = useState('');
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
@@ -584,7 +585,7 @@ function MoveModal({ kind, onClose }: { kind: MoneyMove['kind']; onClose: () => 
           </div>
           <Field label="Kontragent (kimga)" hint="Yetkazib beruvchiga to‘lov uning qarzini kamaytiradi">{(id) => (
             <Select id={id} value={cp} onChange={(e) => setCp(e.target.value)}>
-              <option value="">—</option>{(cps.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} · {CP_TYPE[c.type]}</option>)}
+              <option value="">—</option>{(cps.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} · {ct.labelOf(c)}</option>)}
             </Select>)}
           </Field>
         </>}
@@ -619,7 +620,9 @@ function AllParties({ onTech }: { onTech: (id: string) => void }) {
   const [open, setOpen] = useState<Counterparty | 'new' | null>(null);
   const [prof, setProf] = useState<string | null>(null);
   const [sort, setSort] = useState<{ k: string; dir: 1 | -1 }>({ k: 'name', dir: 1 });
-  const cps = useList<Counterparty>('counterparties', { type: type || undefined, archived: arch });
+  const ct = useCpTypes();
+  const [typesOpen, setTypesOpen] = useState(false);
+  const cps = useList<Counterparty>('counterparties', { archived: arch });
   // Kontragentlar ikkala filialda umumiy, summalar esa faqat joriy filial bo'yicha.
   const inv = useList<Invoice>('counterparty_invoices', { branch_id: branch.id });
   const pays = useList<MoneyMove>('money_moves', { branch_id: branch.id, kind: 'expense', 'counterparty_id.not': null }, { limit: 5000 });
@@ -630,7 +633,7 @@ function AllParties({ onTech }: { onTech: (id: string) => void }) {
     + (techs.data?.find((t) => t.id === id)?.earned ?? 0);
   const paidOf = (id: string) => (pays.data ?? []).filter((x) => x.counterparty_id === id).reduce((a, x) => a + x.amount, 0);
   const has = (v: string | null | undefined, n: string) => !n || (v ?? '').toLowerCase().includes(n.toLowerCase());
-  const rows = (cps.data ?? []).filter((c) => has(c.name, f.name) && has(c.phone, f.phone) && has(c.email, f.email) && has(c.website, f.web) && has(c.note, f.note))
+  const rows = (cps.data ?? []).filter((c) => (!type || ct.keyOf(c) === type) && has(c.name, f.name) && has(c.phone, f.phone) && has(c.email, f.email) && has(c.website, f.web) && has(c.note, f.note))
     .map((c) => ({ c, done: doneOf(c.id), paid: paidOf(c.id), bal: paidOf(c.id) - doneOf(c.id) }))
     .sort((a, b) => {
       const k = sort.k; const va = k === 'bal' ? a.bal : k === 'done' ? a.done : k === 'paid' ? a.paid : String((a.c as unknown as Record<string, unknown>)[k] ?? '');
@@ -646,6 +649,7 @@ function AllParties({ onTech }: { onTech: (id: string) => void }) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         {can('cashbox.edit') && <button type="button" onClick={() => setOpen('new')} className="inline-flex h-9 items-center gap-1.5 rounded-[3px] bg-primary px-3.5 text-sm text-white"><Plus size={15} /> Kontragent qo‘shish</button>}
+        {can('cashbox.edit') && <button type="button" onClick={() => setTypesOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-[3px] border border-line bg-white px-3 text-sm">Turlar</button>}
         <label className="flex items-center gap-1.5 text-sm text-sub"><input type="checkbox" checked={arch} onChange={(e) => setArch(e.target.checked)} /> Arxiv</label>
         <span className="ml-auto text-sm text-sub">{branch.name} bo‘yicha · Ko‘rsatilganlar balansi: <b className={tot < 0 ? 'text-bad' : 'text-fg'}>{money(tot)}</b></span>
       </div>
@@ -658,7 +662,7 @@ function AllParties({ onTech }: { onTech: (id: string) => void }) {
             ))}<th className="border-b border-line" /></tr>
             <tr className="bg-surface">
               <th className="p-1.5"><input aria-label="Nomi bo‘yicha filtr" className={fi} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></th>
-              <th className="p-1.5"><select aria-label="Subkategoriya bo‘yicha filtr" className={fi} value={type} onChange={(e) => setType(e.target.value)}><option value="">Hammasi</option>{Object.entries(CP_TYPE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></th>
+              <th className="p-1.5"><select aria-label="Subkategoriya bo‘yicha filtr" className={fi} value={type} onChange={(e) => setType(e.target.value)}><option value="">Hammasi</option>{ct.options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select></th>
               <th className="p-1.5"><input aria-label="Telefon bo‘yicha filtr" className={fi} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></th>
               <th className="p-1.5"><input aria-label="E-mail bo‘yicha filtr" className={fi} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></th>
               <th className="p-1.5"><input aria-label="Veb-sayt bo‘yicha filtr" className={fi} value={f.web} onChange={(e) => setF({ ...f, web: e.target.value })} /></th>
@@ -672,7 +676,7 @@ function AllParties({ onTech }: { onTech: (id: string) => void }) {
             {rows.map(({ c, done, paid, bal }) => (
               <tr key={c.id} className="border-t border-line hover:bg-surface">
                 <td className="px-2.5 py-2"><button type="button" onClick={() => (c.type === 'technician' ? onTech(c.id) : setProf(c.id))} title="Kontragent kartasini ochish" className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline"><UserRound size={14} />{c.name}</button></td>
-                <td className="px-2.5 py-2">{CP_TYPE[c.type]}</td>
+                <td className="px-2.5 py-2">{ct.labelOf(c)}</td>
                 <td className="px-2.5 py-2">{c.phone}</td>
                 <td className="px-2.5 py-2">{c.email}</td>
                 <td className="px-2.5 py-2">{c.website}</td>
@@ -688,9 +692,10 @@ function AllParties({ onTech }: { onTech: (id: string) => void }) {
       </Card>
       <div className="flex items-center gap-3 text-sm text-sub">
         <span>Jami: <b className="text-fg">{rows.length}</b></span>
-        <XlsBtn onClick={() => downloadXlsx('Kontragentlar.xlsx', [{ name: 'Kontragentlar', rows: [COLS.map((c) => c[1]), ...rows.map(({ c, done, paid, bal }) => [c.name, CP_TYPE[c.type], c.phone ?? '', c.email ?? '', c.website ?? '', c.note ?? '', bal, done, paid])] }])} />
+        <XlsBtn onClick={() => downloadXlsx('Kontragentlar.xlsx', [{ name: 'Kontragentlar', rows: [COLS.map((c) => c[1]), ...rows.map(({ c, done, paid, bal }) => [c.name, ct.labelOf(c), c.phone ?? '', c.email ?? '', c.website ?? '', c.note ?? '', bal, done, paid])] }])} />
       </div>
       {open && <CounterpartyForm cp={open === 'new' ? undefined : open} onClose={() => setOpen(null)} />}
+      {typesOpen && <CpTypesModal onClose={() => setTypesOpen(false)} />}
     </div>
   );
 }

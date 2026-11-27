@@ -58,9 +58,10 @@ export interface PriceItem {
 
 export interface Cashbox { id: string; org_id: string; branch_id: string; name: string; method: string; position: number; archived: boolean }
 
-export type CounterpartyType = 'supplier' | 'doctor' | 'assistant' | 'lab' | 'technician' | 'other';
+export type CounterpartyType = 'supplier' | 'doctor' | 'assistant' | 'technician' | 'other';
+export interface CounterpartyKind { id: string; org_id: string; name: string; position: number }
 export interface Counterparty {
-  id: string; org_id: string; type: CounterpartyType; name: string; phone: string | null; email: string | null; website: string | null;
+  id: string; org_id: string; type: CounterpartyType; type_id: string | null; name: string; phone: string | null; email: string | null; website: string | null;
   address: string | null; contact_person: string | null; inn: string | null; bank_name: string | null;
   bank_account: string | null; mfo: string | null; note: string | null; archived: boolean;
 }

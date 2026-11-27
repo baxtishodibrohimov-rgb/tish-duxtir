@@ -79,9 +79,11 @@ const R: Record<string, Resource> = {
   cashboxes: { table: 'cashboxes', scope: 'branch', read: null, write: 'settings.edit',
     columns: ['branch_id', 'name', 'method', 'position', 'archived'], filters: ['branch_id', 'archived'], order: 'position, name' },
   counterparties: { table: 'counterparties', scope: 'org', read: null, write: 'cashbox.edit',
-    columns: ['type', 'name', 'phone', 'email', 'address', 'contact_person', 'inn', 'bank_name', 'bank_account', 'mfo', 'note', 'archived', 'website'],
-    filters: ['type', 'archived'], search: ['name', 'phone', 'inn'], order: 'name',
+    columns: ['type', 'type_id', 'name', 'phone', 'email', 'address', 'contact_person', 'inn', 'bank_name', 'bank_account', 'mfo', 'note', 'archived', 'website'],
+    filters: ['type', 'type_id', 'archived'], search: ['name', 'phone', 'inn'], order: 'name',
     extraWrite: { perm: 'warehouse.admin', when: (r) => r.type === 'supplier' } },
+  counterparty_types: { table: 'counterparty_types', scope: 'org', read: null, write: 'cashbox.edit',
+    columns: ['name', 'position'], order: 'position, name' },
   counterparty_invoices: { table: 'counterparty_invoices', scope: 'branch', read: 'cashbox.view', write: 'cashbox.edit',
     columns: ['branch_id', 'counterparty_id', 'inv_date', 'description', 'amount'], filters: ['branch_id', 'counterparty_id'], order: 'inv_date desc, created_at desc' },
   expense_categories: { table: 'expense_categories', scope: 'org', read: null, write: 'cashbox.edit',
@@ -125,7 +127,7 @@ const REFS: Record<string, string> = {
   act_id: 'acts', price_item_id: 'price_items', plan_id: 'treatment_plans', record_id: 'treatment_records',
   cashbox_id: 'cashboxes', to_cashbox_id: 'cashboxes', counterparty_id: 'counterparties', stock_doc_id: 'stock_docs',
   warehouse_id: 'warehouses', to_warehouse_id: 'warehouses', product_id: 'products', brand_id: 'brands',
-  parent_id: 'product_categories', member_id: 'members', doc_id: 'stock_docs', photo_file_id: 'record_files', group_id: 'work_mat_groups',
+  parent_id: 'product_categories', member_id: 'members', doc_id: 'stock_docs', photo_file_id: 'record_files', group_id: 'work_mat_groups', type_id: 'counterparty_types',
 };
 const CATEGORY_REF: Record<string, string> = {
   price_items: 'price_categories', products: 'product_categories', money_moves: 'expense_categories',
