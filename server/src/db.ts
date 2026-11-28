@@ -15,6 +15,8 @@ export async function tx<T>(userId: string | null, fn: (c: Db) => Promise<T>): P
   const c = await pool.connect();
   try {
     await c.query('begin');
+    // Kun chegaralari ('2026-11-28'::date) hamma joyda Toshkent vaqti bo'yicha bo'lsin (server UTC'da ishlasa ham).
+    await c.query(`select set_config('TimeZone', 'Asia/Tashkent', true)`);
     if (userId) await c.query(`select set_config('app.user_id', $1, true)`, [userId]);
     const r = await fn(c);
     await c.query('commit');
